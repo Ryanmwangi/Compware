@@ -1,3 +1,6 @@
+/// Form component for adding a new item.
+/// Handles user input for item name, description, and optional tags.
+/// Calls `on_submit` when the form is submitted.
 use leptos::*;
 use leptos_dom::ev::SubmitEvent;
 
@@ -7,6 +10,7 @@ pub fn ItemForm(on_submit: Box<dyn Fn(String, String, Vec<(String, String)>)>) -
     let (description, set_description) = create_signal(String::new());
     let (tags, set_tags) = create_signal(Vec::<(String, String)>::new());
 
+    // Handle form submission.
     let handle_submit = move |ev: SubmitEvent| {
         ev.prevent_default();
         on_submit(name.get(), description.get(), tags.get().clone());

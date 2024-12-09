@@ -1,3 +1,5 @@
+/// Component to display a list of items.
+/// Iterates through the items and renders their name, description, and tags.
 use leptos::*;
 
 use crate::models::item::Item;

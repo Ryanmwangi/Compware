@@ -1,3 +1,5 @@
+/// Represents an Item in CompareWare.
+/// Each item has metadata and key-value tags for categorization.
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
