@@ -1,15 +1,14 @@
 use leptos::*;
-use leptos_dom::ev::SubmitEvent; // Import the correct event type
+use leptos_dom::ev::SubmitEvent;
 
 #[component]
-pub fn ItemForm(on_submit: Box<dyn Fn(String, String, Vec<String>)>) -> impl IntoView {
+pub fn ItemForm(on_submit: Box<dyn Fn(String, String, Vec<(String, String)>)>) -> impl IntoView {
     let (name, set_name) = create_signal(String::new());
     let (description, set_description) = create_signal(String::new());
-    let (tags, set_tags) = create_signal(Vec::<String>::new());
+    let (tags, set_tags) = create_signal(Vec::<(String, String)>::new());
 
-    // Use SubmitEvent for the form submission handler
     let handle_submit = move |ev: SubmitEvent| {
-        ev.prevent_default(); // Prevent form submission from reloading the page
+        ev.prevent_default();
         on_submit(name.get(), description.get(), tags.get().clone());
 
         // Reset values after submission
