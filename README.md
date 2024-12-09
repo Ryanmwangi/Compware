@@ -1,72 +1,46 @@
-<picture>
-    <source srcset="https://raw.githubusercontent.com/leptos-rs/leptos/main/docs/logos/Leptos_logo_Solid_White.svg" media="(prefers-color-scheme: dark)">
-    <img src="https://raw.githubusercontent.com/leptos-rs/leptos/main/docs/logos/Leptos_logo_RGB.svg" alt="Leptos Logo">
-</picture>
+# CompareWare
 
-# Leptos Starter Template
+CompareWare is an open-source platform for comparing tools (software, hardware, etc.) with structured, crowdsourced data. It combines **Leptos** for a modern, reactive frontend and **Nostr** for decentralized data storage.
 
-This is a template for use with the [Leptos](https://github.com/leptos-rs/leptos) web framework and the [cargo-leptos](https://github.com/akesson/cargo-leptos) tool.
+## **Features**
+- **Item Management**: Add, view, and manage items with metadata and key-value tags.
+- **Nostr Integration**: 
+  - Store and share data as Nostr events.
+  - Authenticate users with Nostr keys.
+- **Future Features**: Reviews and a Web of Trust for collaborative insights.
 
-## Creating your template repo
 
-If you don't have `cargo-leptos` installed you can install it with
+## **Getting Started**
 
-`cargo install cargo-leptos --locked`
+### Prerequisites
+- Rust (latest stable version)
+- Leptos framework
 
-Then run
+### Installation
+1. Clone the repository:
+   ```bash
+   git clone https://forge.ftt.gmbh/ryanmwangi/Compware.git
+   cd compareware
+   ```
+2. Run the development server:
+   ```bash
+   cargo leptos serve
+   ```
+3. Open your browser at [http://localhost:3000](http://localhost:3000)
 
-`cargo leptos new --git leptos-rs/start`
+## **Roadmap**
 
-to generate a new project template (you will be prompted to enter a project name).
+1. **Item Management** (In progress)
+   - Implement a form (`item_form.rs`) to allow users to add new items with metadata and key-value tags.
+   - Create a listing component (`items_list.rs`) to display and manage added items.
+   - Add backend functionality to validate and persist items using the Leptos framework.
 
-`cd {projectname}`
+2. **Review System** (To be implemented)
+   - Design a data model to handle reviews, including ratings, comments, and reviewer metadata.
+   - Build a user interface for submitting and viewing reviews linked to specific items.
+   - Integrate filters and sorting to display reviews based on relevance and ratings.
 
-to go to your newly created project.
-
-Of course, you should explore around the project structure, but the best place to start with your application code is in `src/app.rs`.
-
-## Running your project
-
-`cargo leptos watch`  
-By default, you can access your local project at `http://localhost:3000`
-
-## Installing Additional Tools
-
-By default, `cargo-leptos` uses `nightly` Rust, `cargo-generate`, and `sass`. If you run into any trouble, you may need to install one or more of these tools.
-
-1. `rustup toolchain install nightly --allow-downgrade` - make sure you have Rust nightly
-2. `rustup target add wasm32-unknown-unknown` - add the ability to compile Rust to WebAssembly
-3. `cargo install cargo-generate` - install `cargo-generate` binary (should be installed automatically in future)
-4. `npm install -g sass` - install `dart-sass` (should be optional in future)
-
-## Executing a Server on a Remote Machine Without the Toolchain
-After running a `cargo leptos build --release` the minimum files needed are:
-
-1. The server binary located in `target/server/release`
-2. The `site` directory and all files within located in `target/site`
-
-Copy these files to your remote server. The directory structure should be:
-```text
-leptos_start
-site/
-```
-Set the following environment variables (updating for your project as needed):
-```sh
-export LEPTOS_OUTPUT_NAME="leptos_start"
-export LEPTOS_SITE_ROOT="site"
-export LEPTOS_SITE_PKG_DIR="pkg"
-export LEPTOS_SITE_ADDR="127.0.0.1:3000"
-export LEPTOS_RELOAD_PORT="3001"
-```
-Finally, run the server binary.
-
-## Notes about CSR and Trunk:
-Although it is not recommended, you can also run your project without server integration using the feature `csr` and `trunk serve`:
-
-`trunk serve --open --features csr`
-
-This may be useful for integrating external tools which require a static site, e.g. `tauri`.
-
-## Licensing
-
-This template itself is released under the Unlicense. You should replace the LICENSE for your own application with an appropriate license if you plan to release it publicly.
+3. **Nostr Integration** (To be integrated)
+   - Use Nostr events for decentralized data storage, mapping item data to specific Nostr event types.
+   - Authenticate users through their Nostr keys for secure and decentralized access.
+   - Enable data sharing and synchronization with Nostr-compatible clients.
