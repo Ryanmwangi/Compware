@@ -40,7 +40,7 @@ CompareWare is an open-source platform for comparing tools (software, hardware, 
    - Build a user interface for submitting and viewing reviews linked to specific items.
    - Integrate filters and sorting to display reviews based on relevance and ratings.
 
-3. **Nostr Integration** (To be integrated)
+3. **Nostr Integration** (In progress)
    - Use Nostr events for decentralized data storage, mapping item data to specific Nostr event types.
    - Authenticate users through their Nostr keys for secure and decentralized access.
    - Enable data sharing and synchronization with Nostr-compatible clients.
