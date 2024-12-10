@@ -28,7 +28,7 @@ pub fn App() -> impl IntoView {
             // Form component for adding new items.
             <ItemForm on_submit=Box::new(add_item) />
             // Component to display the list of items.
-            <ItemsList items=items_signal.get() />
+            <ItemsList items=items_signal />
         </div>
     }
 }
