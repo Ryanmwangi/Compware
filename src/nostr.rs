@@ -1,6 +1,5 @@
 use nostr_sdk::client::Error;
 use nostr_sdk::prelude::*;
-use tokio::sync::mpsc;
 use nostr_sdk::RelayPoolNotification;
 
 pub struct NostrClient {
@@ -9,9 +8,9 @@ pub struct NostrClient {
 
 impl NostrClient {
     pub async fn new(relay_url: &str) -> Result<Self, Error> {
-        let keys = Keys::generate_from_os_random();
-        let client = Client::new(&keys);
-        client.add_relay(relay_url, None).await?;
+        let keys = Keys::new(SecretKey::generate());
+        let client = Client::new(keys);
+        client.add_relay(relay_url).await?;
         client.connect().await;
 
         Ok(Self { client })
@@ -23,23 +22,20 @@ impl NostrClient {
         description: String,
         tags: Vec<(String, String)>
     ) -> Result<(), Error> {
-        let content = serde_json::json!({
-            "name": name,
-            "description": description,
-            "tags": tags
-        });
-        self.client.publish_text_note(content.to_string(), &[]).await?;
+        let content = format!("{{\"name\":\"{}\",\"description\":\"{}\",\"tags\":[{}]}}", name, description, tags.iter().map(|(k, v)| format!("(\"{}\",\"{}\")", k, v)).collect::<Vec<_>>().join(","));
+        let event = EventBuilder::new(Kind::TextNote, content).build()?;
+        self.client.send_event_builder(event).await?;
         Ok(())
     }
 
     pub async fn subscribe_to_items(
         &self,
-        tx: mpsc::Sender<String>
+        tx: std::sync::mpsc::Sender<String>
     ) -> Result<(), Error> {
         let mut notifications = self.client.notifications();
-        tokio::spawn(async move {
+        std::thread::spawn(move || {
             while let Ok(notification) = notifications.recv().await {
-                if let RelayPoolNotification::Event(_url, event) = notification {
+                if let RelayPoolNotification::Event { relay_url, subscription_id, event } = notification {
                     let content = event.content.clone();
                     tx.send(content).await.unwrap();
                 }

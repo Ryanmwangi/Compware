@@ -5,9 +5,8 @@ use leptos_meta::*;
 use crate::components::{item_form::ItemForm, items_list::ItemsList};
 use crate::models::item::Item;
 use crate::nostr::NostrClient;
-use tokio::sync::mpsc;
+use std::sync::mpsc;
 use uuid::Uuid;
-use serde_json;
 use leptos::spawn_local;
 
 #[component]
@@ -15,8 +14,7 @@ pub fn App() -> impl IntoView {
     provide_meta_context();
     // Signal to store and update the list of items.
     let (items_signal, set_items) = create_signal(Vec::<Item>::new());
-    let (tx, mut rx) = mpsc::channel::<String>(100);
-
+    let (tx, mut rx) = mpsc::channel::<String>();
 
     spawn_local(async move {
         //initialize nostr client
@@ -24,7 +22,7 @@ pub fn App() -> impl IntoView {
         nostr_client.subscribe_to_items(tx.clone()).await.unwrap();
 
         // Handle incoming events
-        while let Some(content) = rx.recv().await {
+        while let Ok(content) = rx.recv(){
             if let Ok(item) = serde_json::from_str::<Item>(&content) {
                 set_items.update(|items| items.push(item));
             }
