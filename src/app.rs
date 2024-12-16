@@ -2,8 +2,9 @@
 /// Combines the item management components (form and list) to provide a cohesive user interface.
 use leptos::*;
 use leptos_meta::*;
-use crate::components::{item_form::ItemForm, items_list::ItemsList};
+use crate::components::{item_form::ItemForm, items_list::ItemsList, review_form::ReviewForm, reviews_list::ReviewsList };
 use crate::models::item::Item;
+use crate::models::review::Review;
 use crate::nostr::NostrClient;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -37,6 +38,7 @@ pub fn App() -> impl IntoView {
                 name: name.clone(),
                 description: description.clone(),
                 tags: tags.clone(),
+                reviews: vec![],
             };
             items.push(item);
         });
@@ -45,6 +47,11 @@ pub fn App() -> impl IntoView {
             let nostr_client = NostrClient::new("wss://relay.example.com").await.unwrap();
             nostr_client.publish_item(name, description, tags).await.unwrap();
         });
+    };
+
+    // Handle review submission
+    let submit_review = move |content: String| {
+        // Handle the review submission logic
     };
 
     view! {
@@ -56,6 +63,9 @@ pub fn App() -> impl IntoView {
                 <ItemForm on_submit=Box::new(add_item) />
                 // Component to display the list of items.
                 <ItemsList items=items_signal />
+                // Reviews form and list
+                <ReviewForm item_id={items_signal.get().first().unwrap().id.clone()} on_submit={submit_review} />
+                <ReviewsList reviews={vec![]} /> 
             </div>
         </>
     }
