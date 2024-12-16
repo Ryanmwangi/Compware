@@ -7,11 +7,13 @@ pub fn ReviewsList(reviews: Vec<Review>) -> impl IntoView {
         <div>
             <h3>{ "Reviews" }</h3>
             <ul>
-                { for review in reviews {
-                    view! {
-                        <li>{ &review.content }</li>
-                    }
-                } }
+                { 
+                    reviews.into_iter().map(|review| {
+                        view! {
+                            <li>{ review.content }</li>
+                        }
+                    }).collect::<Vec<_>>()
+                }
             </ul>
         </div>
     }

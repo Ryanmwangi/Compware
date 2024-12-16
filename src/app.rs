@@ -4,7 +4,6 @@ use leptos::*;
 use leptos_meta::*;
 use crate::components::{item_form::ItemForm, items_list::ItemsList, review_form::ReviewForm, reviews_list::ReviewsList };
 use crate::models::item::Item;
-use crate::models::review::Review;
 use crate::nostr::NostrClient;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -64,7 +63,7 @@ pub fn App() -> impl IntoView {
                 // Component to display the list of items.
                 <ItemsList items=items_signal />
                 // Reviews form and list
-                <ReviewForm item_id={items_signal.get().first().unwrap().id.clone()} on_submit={submit_review} />
+                <ReviewForm item_id={items_signal.get().first().unwrap().id.clone()}  on_submit={Box::new(submit_review)} />
                 <ReviewsList reviews={vec![]} /> 
             </div>
         </>
