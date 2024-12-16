@@ -40,6 +40,7 @@ impl NostrClient {
         let client = Client::new(keys.clone());
         client.add_relay(relay_url).await?;
         client.connect().await;
+        println!("Connected to relay: {}", relay_url);
 
         Ok(Self { client, keys })
     }
@@ -61,17 +62,19 @@ impl NostrClient {
         );
 
         // Create the event builder
-        let event_builder = EventBuilder::new(Kind::TextNote, content);
-                    // Build the unsigned event
+        let event_builder = EventBuilder::new(Kind::TextNote, content.clone());
+        // Build the unsigned event
         let unsigned_event = event_builder.build(self.keys.public_key());
-                    // Sign the event and handle the error explicitly
+        // Sign the event and handle the error explicitly
         let signed_event = match unsigned_event.sign(&self.keys).await {
             Ok(event) => event,
             Err(e) => return Err(MyError::from(e)), // Convert the error to the expected type
         };
 
         // Send the event
-        self.client.send_event(signed_event).await?;
+        self.client.send_event(signed_event.clone()).await?;
+        println!("Event published: {:?}", signed_event);
+        println!("Publishing content: {}", content);
         Ok(())
     }
     pub async fn subscribe_to_items(
@@ -90,7 +93,7 @@ impl NostrClient {
                 }
             }
         });
-
+        
         Ok(())
     }
 }
