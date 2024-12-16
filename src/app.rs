@@ -49,7 +49,7 @@ pub fn App() -> impl IntoView {
     };
 
     // Handle review submission
-    let submit_review = move |content: String| {
+    let submit_review = move |_| {
         // Handle the review submission logic
     };
 

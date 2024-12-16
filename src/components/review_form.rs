@@ -1,25 +1,26 @@
 use leptos::*;
-use crate::models::item::Item;
-use leptos::ev::Event;
-
 
 #[component]
-pub fn ReviewForm(item_id: String, on_submit: impl Fn(String) + 'static) -> impl IntoView {
+pub fn ReviewForm(item_id: String, on_submit: Box<dyn Fn(String) + 'static>) -> impl IntoView {
     let (review_content, set_review_content) = create_signal(String::new());
 
-    let submit_review = move |e| {
+    let submit_review = move || {
         on_submit(review_content.get());
+        set_review_content.set(String::new()); // Clear the textarea after submission
     };
 
     view! {
         <div>
-            <h3>{ "Submit Review" }</h3>
+            <h3>"Submit Review"</h3>
             <textarea
                 placeholder="Write your review here"
-                value={review_content.get()}
-                oninput={move |e: Event| set_review_content(e.target().unwrap().value())}
+                prop:value=review_content
+                on:input=move |ev| {
+                    let input_value = event_target_value(&ev);
+                    set_review_content.set(input_value);
+                }
             />
-            <button onclick={submit_review}>{ "Submit Review" }</button>
+            <button on:click=move |_| submit_review()>"Submit Review"</button>
         </div>
     }
 }
