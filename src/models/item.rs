@@ -9,5 +9,5 @@ pub struct Item {
     pub name: String,
     pub description: String,
     pub tags: Vec<(String, String)>,
-    pub reviews: Vec<Review>, // Add reviews field here
+    pub reviews: Vec<Review>,
 }

@@ -1,9 +1,7 @@
-/// Main application entry point for CompareWare.
-/// Combines the item management components (form and list) to provide a cohesive user interface.
 use leptos::*;
 use leptos_meta::*;
 use crate::components::{item_form::ItemForm, items_list::ItemsList, review_form::ReviewForm, reviews_list::ReviewsList};
-use crate::models::item::Item;
+use crate::models::{item::Item, review::Review}; // Ensure Review is imported
 use crate::nostr::NostrClient;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -18,6 +16,8 @@ pub fn App() -> impl IntoView {
     let (items_signal, set_items) = create_signal(Vec::<Item>::new());
     // Signal to store the ID of the current item for reviews
     let (current_item_id, set_current_item_id) = create_signal(String::new());
+    // Signal to store reviews for the current item
+    let (reviews_signal, set_reviews) = create_signal(Vec::<Review>::new());
     let (tx, mut rx) = mpsc::channel::<String>(100);
 
     spawn_local(async move {
@@ -56,9 +56,21 @@ pub fn App() -> impl IntoView {
     };
 
     // Handle review submission
-    let submit_review = move |review_content: String| {
-        // Logic for submitting a review
-        println!("Review submitted: {}", review_content);
+    let submit_review = {
+        let current_item_id = current_item_id.clone(); // Clone the current item ID
+        let user_id = "some_user_id".to_string(); // Replace with actual user ID logic
+
+        move |review_content: String| {
+            // Create a new review and add it to the reviews list
+            let new_review = Review {
+                content: review_content.clone(),
+                item_id: current_item_id.get().clone(), // Use the current item ID
+                user_id: user_id.clone(), // Use the user ID
+            };
+            set_reviews.update(|reviews| reviews.push(new_review));
+            println!("Review submitted: {}", review_content);
+            println!("Current reviews: {:?}", reviews_signal.get());
+        }
     };
 
     view! {
@@ -73,7 +85,7 @@ pub fn App() -> impl IntoView {
                 // Component to display the list of items.
                 <ItemsList items=items_signal />
                 // Component to display the list of reviews for the current item.
-                <ReviewsList reviews={vec![]} />
+                <ReviewsList reviews={reviews_signal.get()} />
             </div>
         </>
     }
