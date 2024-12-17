@@ -1,7 +1,7 @@
 use leptos::*;
 use leptos_meta::*;
 use crate::components::{item_form::ItemForm, items_list::ItemsList};
-use crate::models::item::Item;
+use crate::models::item::{Item, ReviewWithRating};
 use crate::nostr::NostrClient;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -29,27 +29,26 @@ pub fn App() -> impl IntoView {
     });
 
     // Add a new item and review using the unified form
-    let add_item = move |name: String, description: String, tags: Vec<(String, String)>, review: String| {
-        let new_id = Uuid::new_v4().to_string(); // Generate a unique ID
-
+    let add_item = move |name: String, description: String, tags: Vec<(String, String)>, review: String, rating: u8| {
+        let new_id = Uuid::new_v4().to_string();
+    
         set_items.update(|items| {
             let item = Item {
                 id: new_id.clone(),
-                name: name.clone(),
-                description: description.clone(),
-                tags: tags.clone(),
-                reviews: vec![review.clone()], // Initialize reviews
+                name,
+                description,
+                tags,
+                reviews: vec![ReviewWithRating { content: review.clone(), rating }],
             };
             items.push(item);
         });
-
-        // Publish item to Nostr
+    
         spawn_local(async move {
             let nostr_client = NostrClient::new("wss://relay.example.com").await.unwrap();
-            nostr_client.publish_item(name, description, tags).await.unwrap();
+            nostr_client.publish_item("New item added!".to_string(), "".to_string(), vec![]).await.unwrap();
         });
     };
-
+    
     view! {
         <Stylesheet href="/assets/style.css" />
         <div>

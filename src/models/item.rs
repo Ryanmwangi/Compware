@@ -8,5 +8,11 @@ pub struct Item {
     pub name: String,
     pub description: String,
     pub tags: Vec<(String, String)>,
-    pub reviews: Vec<String>,
+    pub reviews: Vec<ReviewWithRating>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ReviewWithRating {
+    pub content: String,
+    pub rating: u8, // Ratings from 1 to 5
 }
