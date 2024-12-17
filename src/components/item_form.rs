@@ -2,12 +2,15 @@ use leptos::*;
 use leptos_dom::ev::SubmitEvent;
 
 #[component]
-pub fn ItemForm(on_submit: Box<dyn Fn(String, String, Vec<(String, String)>)>) -> impl IntoView {
+pub fn ItemForm(
+    on_submit: Box<dyn Fn(String, String, Vec<(String, String)>, String) + 'static>
+) -> impl IntoView {
     let (name, set_name) = create_signal(String::new());
     let (description, set_description) = create_signal(String::new());
     let (tags, set_tags) = create_signal(Vec::<(String, String)>::new());
     let (tag_key, set_tag_key) = create_signal(String::new());
     let (tag_value, set_tag_value) = create_signal(String::new());
+    let (review, set_review) = create_signal(String::new());
 
     // Handle adding a new tag
     let add_tag = move |_| {
@@ -21,27 +24,38 @@ pub fn ItemForm(on_submit: Box<dyn Fn(String, String, Vec<(String, String)>)>) -
     // Handle form submission.
     let handle_submit = move |ev: SubmitEvent| {
         ev.prevent_default();
-        on_submit(name.get(), description.get(), tags.get().clone());
+        on_submit(
+            name.get(),              // Item name
+            description.get(),       // Item description
+            tags.get().clone(),      // Tags
+            review.get(),            // Review
+        );
 
         // Reset values after submission
-        set_name.update(|n| *n = String::new());
-        set_description.update(|d| *d = String::new());
-        set_tags.update(|t| t.clear());
+        set_name.set(String::new());
+        set_description.set(String::new());
+        set_tags.set(vec![]);
+        set_review.set(String::new());
     };
 
     view! {
         <form on:submit=handle_submit>
+            // Item Name Input
             <input
                 type="text"
                 placeholder="Name"
                 value={name.get()}
                 on:input=move |e| set_name.set(event_target_value(&e))
             />
+
+            // Item Description Input
             <textarea
                 placeholder="Description"
                 value={description.get()}
                 on:input=move |e| set_description.set(event_target_value(&e))
             />
+
+            // Tags Section
             <div>
                 <h3>{ "Add Tags" }</h3>
                 <input
@@ -61,9 +75,21 @@ pub fn ItemForm(on_submit: Box<dyn Fn(String, String, Vec<(String, String)>)>) -
             <ul>
                 {tags.get().iter().map(|(key, value)| view! {
                     <li>{ format!("{}: {}", key, value) }</li>
-                }).collect::<Vec<_>>()}
+                }).collect::<Vec<_>>() }
             </ul>
-            <button type="submit">{ "Add Item" }</button>
+
+            // Review Input
+            <div>
+                <h3>{ "Review" }</h3>
+                <textarea
+                    placeholder="Write your review here"
+                    value={review.get()}
+                    on:input=move |e| set_review.set(event_target_value(&e))
+                />
+            </div>
+
+            // Submit Button
+            <button type="submit">{ "Add Item with Review" }</button>
         </form>
     }
 }

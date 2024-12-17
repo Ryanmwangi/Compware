@@ -1,7 +1,7 @@
 use leptos::*;
 use leptos_meta::*;
-use crate::components::{item_form::ItemForm, items_list::ItemsList, review_form::ReviewForm, reviews_list::ReviewsList};
-use crate::models::{item::Item, review::Review}; // Ensure Review is imported
+use crate::components::{item_form::ItemForm, items_list::ItemsList};
+use crate::models::item::Item;
 use crate::nostr::NostrClient;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -12,20 +12,15 @@ use nostr_sdk::serde_json;
 pub fn App() -> impl IntoView {
     provide_meta_context();
 
-    // Signal to store and update the list of items.
+    // Signal to manage the list of items
     let (items_signal, set_items) = create_signal(Vec::<Item>::new());
-    // Signal to store the ID of the current item for reviews
-    let (current_item_id, set_current_item_id) = create_signal(String::new());
-    // Signal to store reviews for the current item
-    let (reviews_signal, set_reviews) = create_signal(Vec::<Review>::new());
     let (tx, mut rx) = mpsc::channel::<String>(100);
 
+    // Nostr client subscription for items
     spawn_local(async move {
-        // Initialize Nostr client
         let nostr_client = NostrClient::new("wss://relay.damus.io").await.unwrap();
         nostr_client.subscribe_to_items(tx.clone()).await.unwrap();
 
-        // Handle incoming events
         while let Some(content) = rx.recv().await {
             if let Ok(item) = serde_json::from_str::<Item>(&content) {
                 set_items.update(|items| items.push(item));
@@ -33,60 +28,36 @@ pub fn App() -> impl IntoView {
         }
     });
 
-    // Function to handle adding a new item to the list.
-    let add_item = move |name: String, description: String, tags: Vec<(String, String)>| {
-        let new_id = Uuid::new_v4().to_string(); // Generate a new UUID for the item
-        set_current_item_id.set(new_id.clone()); // Update the current item ID
+    // Add a new item and review using the unified form
+    let add_item = move |name: String, description: String, tags: Vec<(String, String)>, review: String| {
+        let new_id = Uuid::new_v4().to_string(); // Generate a unique ID
 
         set_items.update(|items| {
             let item = Item {
-                id: new_id,
+                id: new_id.clone(),
                 name: name.clone(),
                 description: description.clone(),
                 tags: tags.clone(),
-                reviews: vec![],
+                reviews: vec![review.clone()], // Initialize reviews
             };
             items.push(item);
         });
 
+        // Publish item to Nostr
         spawn_local(async move {
             let nostr_client = NostrClient::new("wss://relay.example.com").await.unwrap();
             nostr_client.publish_item(name, description, tags).await.unwrap();
         });
     };
 
-    // Handle review submission
-    let submit_review = {
-        let current_item_id = current_item_id.clone(); // Clone the current item ID
-        let user_id = "some_user_id".to_string(); // Replace with actual user ID logic
-
-        move |review_content: String| {
-            // Create a new review and add it to the reviews list
-            let new_review = Review {
-                content: review_content.clone(),
-                item_id: current_item_id.get().clone(), // Use the current item ID
-                user_id: user_id.clone(), // Use the user ID
-            };
-            set_reviews.update(|reviews| reviews.push(new_review));
-            println!("Review submitted: {}", review_content);
-            println!("Current reviews: {:?}", reviews_signal.get());
-        }
-    };
-
     view! {
-        <>
-            <Stylesheet href="/assets/style.css" />
-            <div>
-                <h1>{ "CompareWare" }</h1>
-                // Form component for adding new items.
-                <ItemForm on_submit=Box::new(add_item) />
-                // Reviews form
-                <ReviewForm item_id={current_item_id.get()} on_submit={Box::new(submit_review)} />
-                // Component to display the list of items.
-                <ItemsList items=items_signal />
-                // Component to display the list of reviews for the current item.
-                <ReviewsList reviews={reviews_signal.get()} />
-            </div>
-        </>
+        <Stylesheet href="/assets/style.css" />
+        <div>
+            <h1>{ "CompareWare" }</h1>
+            // Unified form for adding an item and its first review
+            <ItemForm on_submit=Box::new(add_item) />
+            // Display all items, including reviews
+            <ItemsList items=items_signal />
+        </div>
     }
 }
