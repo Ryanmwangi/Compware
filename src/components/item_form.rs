@@ -1,5 +1,6 @@
 use leptos::*;
 use leptos_dom::ev::SubmitEvent;
+use leptos::logging::log;
 
 #[component]
 pub fn ItemForm(on_submit: Box<dyn Fn(String, String, Vec<(String, String)>, String, u8)>) -> impl IntoView {
@@ -21,6 +22,13 @@ pub fn ItemForm(on_submit: Box<dyn Fn(String, String, Vec<(String, String)>, Str
 
     let handle_submit = move |ev: SubmitEvent| {
         ev.prevent_default();
+
+         // Validation
+         if name.get().is_empty() || description.get().is_empty() || rating.get() < 1 || rating.get() > 5 {
+            log!("Validation failed: Check required fields.");
+            return;
+        }
+
         on_submit(
             name.get(),
             description.get(),
