@@ -8,6 +8,17 @@ pub fn ItemsList(items: ReadSignal<Vec<Item>>) -> impl IntoView {
     // Create a signal for selected items
     let (selected_items_signal, set_selected_items) = create_signal(Vec::<usize>::new());
 
+    // Function to toggle selection of an item
+    let toggle_selection = move |i: usize| {
+        set_selected_items.update(|items| {
+            if items.contains(&i) {
+                items.retain(|&x| x != i);
+            } else {
+                items.push(i);
+            }
+        });
+    };
+
     view! {
         <div>
             <h2>{ "Items" }</h2>
@@ -18,18 +29,12 @@ pub fn ItemsList(items: ReadSignal<Vec<Item>>) -> impl IntoView {
                             <input
                                 type="checkbox"
                                 checked={selected_items_signal.get().contains(&i)}
-                                on:change=move |_| {
-                                    if selected_items_signal.get().contains(&i) {
-                                        set_selected_items.update(|items| items.retain(|&x| x != i));
-                                    } else {
-                                        set_selected_items.update(|items| { items.push(i); });
-                                    }
-                                }
+                                on:change=move |_| toggle_selection(i)
                              />
                              {"Select item for comparison"}
                         </label>
                         <div>
-                        <strong>{ item.name.clone() }</strong> - { item.description.clone() }
+                            <strong>{ &item.name }</strong> - { &item.description }
                         </div>
                         <ul>
                             <h4>{ "Tags:" }</h4>
@@ -44,7 +49,7 @@ pub fn ItemsList(items: ReadSignal<Vec<Item>>) -> impl IntoView {
                             }).collect::<Vec<_>>()}
                         </ul>
                     </li>
-                }).collect::<Vec<_>>()}
+                }).collect::<Vec<_>>() }
             </ul>
 
             // Comparison Table
@@ -65,8 +70,8 @@ pub fn ItemsList(items: ReadSignal<Vec<Item>>) -> impl IntoView {
                             let item = &items.get()[i];
                             view! {
                                 <tr key={i.to_string()}>
-                                    <td>{ item.name.clone() }</td>
-                                    <td>{ item.description.clone() }</td>
+                                    <td>{ &item.name }</td>
+                                    <td>{ &item.description }</td>
                                     <td>
                                         {item.tags.iter().map(|(key, value)| view! {
                                             <span>{ key.clone() + ": " + value + " " }</span>
