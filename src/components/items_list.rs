@@ -2,12 +2,75 @@
 /// Iterates through the items and renders their name, description, tags, and reviews.
 use leptos::*;
 use crate::models::item::Item;
+use serde::Deserialize;
+use futures::future;
+use gloo_net::http::Request;
+use wasm_bindgen_futures::spawn_local;
+use std::sync::Arc;
+
+// Define the structure for Wikidata API response
+#[derive(Deserialize, Clone, Debug)]
+struct WikidataResponse {
+    entities: std::collections::HashMap<String, WikidataEntity>,
+}
+#[derive(Deserialize, Clone, Debug)]
+struct WikidataEntity {
+    labels: Option<std::collections::HashMap<String, WikidataLabel>>,
+    descriptions: Option<std::collections::HashMap<String, WikidataLabel>>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct WikidataLabel {
+    value: String,
+}
 
 #[component]
 pub fn ItemsList(items: ReadSignal<Vec<Item>>) -> impl IntoView {
     // Create a signal for selected items
     let (selected_items_signal, set_selected_items) = create_signal(Vec::<usize>::new());
+    let (wikidata_data, set_wikidata_data) = create_signal(Vec::<Option<WikidataEntity>>::new());
 
+     // Fetch additional data from Wikidata for selected items
+     let fetch_wikidata = move || {
+        let selected_indices = selected_items_signal.get();
+        let selected_items: Vec<Item> = selected_indices
+            .iter()
+            .map(|&i| items.get()[i].clone())
+            .collect();
+
+        
+        // Wrap `selected_items` in an `Arc` so it can be cloned
+        let selected_items = Arc::new(selected_items);
+
+        // Clone selected_items before the async block to avoid borrowing issues
+        let selected_items_clone: Arc<Vec<Item>> = Arc::clone(&selected_items);
+
+        // For each selected item, fetch Wikidata attributes
+        let futures = selected_items_clone.iter().map(move |item| {
+            let wikidata_id = item.wikidata_id.clone();
+            async move {
+                if let Some(id) = wikidata_id {
+                    let url = format!("https://www.wikidata.org/wiki/Special:EntityData/{}.json", id);
+                    match Request::get(&url).send().await {
+                        Ok(response) => match response.json::<WikidataResponse>().await {
+                            Ok(parsed_data) => parsed_data.entities.get(&id).cloned(),
+                            Err(_) => None,
+                        },
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                }
+            }
+        }).collect::<Vec<_>>();
+
+    
+        spawn_local(async move {
+            let results = future::join_all(futures).await;
+            set_wikidata_data.set(results);
+        });
+    };
+    
     // Function to toggle selection of an item
     let toggle_selection = move |i: usize| {
         set_selected_items.update(|items| {
@@ -52,6 +115,9 @@ pub fn ItemsList(items: ReadSignal<Vec<Item>>) -> impl IntoView {
                 }).collect::<Vec<_>>() }
             </ul>
 
+            // Button to fetch Wikidata attributes
+            <button on:click=move |_| fetch_wikidata()>{ "Fetch External Data" }</button>
+
             // Comparison Table
             <h2>{ "Comparison Table" }</h2>
             <table>
@@ -61,13 +127,15 @@ pub fn ItemsList(items: ReadSignal<Vec<Item>>) -> impl IntoView {
                         <th>{ "Description" }</th>
                         <th>{ "Tags" }</th>
                         <th>{ "Reviews" }</th>
+                        <th>{ "External Description (Wikidata)" }</th>
                     </tr>
                 </thead>
                 <tbody>
                     {move || {
                         let selected_indices = selected_items_signal.get();
-                        selected_indices.iter().map(|&i| {
+                        selected_indices.iter().enumerate().map(|(idx, &i)| {
                             let item = &items.get()[i];
+                            let wikidata_entity = wikidata_data.get().get(idx).cloned().flatten();
                             view! {
                                 <tr key={i.to_string()}>
                                     <td>{ &item.name }</td>
@@ -81,6 +149,20 @@ pub fn ItemsList(items: ReadSignal<Vec<Item>>) -> impl IntoView {
                                         {item.reviews.iter().map(|review| view! {
                                             <span>{ format!("Rating: {}/5 ", review.rating) }</span>
                                         }).collect::<Vec<_>>()}
+                                    </td>
+                                    <td>
+                                        {move || {
+                                            let entity = wikidata_entity.clone(); // Clone the value
+                                            match entity {
+                                                Some(entity) => entity
+                                                    .descriptions
+                                                    .as_ref()
+                                                    .and_then(|descriptions| descriptions.get("en"))
+                                                    .map(|label| label.value.clone())
+                                                    .unwrap_or_default(),
+                                                None => String::from("No description"),
+                                            }
+                                        }}
                                     </td>
                                 </tr>
                             }

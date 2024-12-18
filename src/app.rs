@@ -39,6 +39,7 @@ pub fn App() -> impl IntoView {
                 description,
                 tags,
                 reviews: vec![ReviewWithRating { content: review.clone(), rating }],
+                wikidata_id: None,
             };
             items.push(item);
         });

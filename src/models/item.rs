@@ -9,6 +9,7 @@ pub struct Item {
     pub description: String,
     pub tags: Vec<(String, String)>,
     pub reviews: Vec<ReviewWithRating>,
+    pub wikidata_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
