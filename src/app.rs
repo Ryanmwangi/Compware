@@ -1,7 +1,7 @@
 use leptos::*;
 use leptos_meta::*;
-use crate::components::{item_form::ItemForm, items_list::ItemsList};
-use crate::models::item::{Item, ReviewWithRating};
+use crate::components::items_list::ItemsList;
+use crate::models::item::Item;
 use crate::nostr::NostrClient;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -28,25 +28,20 @@ pub fn App() -> impl IntoView {
         }
     });
 
-    // Add a new item and review using the unified form
-    let add_item = move |name: String, description: String, tags: Vec<(String, String)>, review: String, rating: u8| {
+    // Function to add a new item from the grid
+    let add_item_from_grid = move || {
         let new_id = Uuid::new_v4().to_string();
     
         set_items.update(|items| {
             let item = Item {
                 id: new_id.clone(),
-                name,
-                description,
-                tags,
-                reviews: vec![ReviewWithRating { content: review.clone(), rating }],
+                name: String::new(),
+                description: String::new(),
+                tags: vec![],
+                reviews: vec![],
                 wikidata_id: None,
             };
             items.push(item);
-        });
-    
-        spawn_local(async move {
-            let nostr_client = NostrClient::new("wss://relay.example.com").await.unwrap();
-            nostr_client.publish_item("New item added!".to_string(), "".to_string(), vec![]).await.unwrap();
         });
     };
     
@@ -54,10 +49,7 @@ pub fn App() -> impl IntoView {
         <Stylesheet href="/assets/style.css" />
         <div>
             <h1>{ "CompareWare" }</h1>
-            // Unified form for adding an item and its first review
-            <ItemForm on_submit=Box::new(add_item) />
-            // Display all items, including reviews
-            <ItemsList items=items_signal />
+            <ItemsList items=items_signal set_items=set_items on_add_item=add_item_from_grid />
         </div>
     }
 }

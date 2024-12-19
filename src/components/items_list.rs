@@ -1,22 +1,20 @@
-/// Component to display a list of items.
-/// Iterates through the items and renders their name, description, tags, and reviews.
-use leptos::*;
 use crate::models::item::Item;
-use serde::Deserialize;
-use futures::future;
 use gloo_net::http::Request;
+use leptos::logging::log;
+use leptos::*;
+use serde::Deserialize;
+use std::collections::HashMap;
 use wasm_bindgen_futures::spawn_local;
-use std::sync::Arc;
 
-// Define the structure for Wikidata API response
 #[derive(Deserialize, Clone, Debug)]
 struct WikidataResponse {
-    entities: std::collections::HashMap<String, WikidataEntity>,
+    entities: HashMap<String, WikidataEntity>,
 }
+
 #[derive(Deserialize, Clone, Debug)]
 struct WikidataEntity {
-    labels: Option<std::collections::HashMap<String, WikidataLabel>>,
-    descriptions: Option<std::collections::HashMap<String, WikidataLabel>>,
+    labels: Option<HashMap<String, WikidataLabel>>,
+    descriptions: Option<HashMap<String, WikidataLabel>>,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -25,144 +23,115 @@ struct WikidataLabel {
 }
 
 #[component]
-pub fn ItemsList(items: ReadSignal<Vec<Item>>) -> impl IntoView {
-    // Create a signal for selected items
-    let (selected_items_signal, set_selected_items) = create_signal(Vec::<usize>::new());
+pub fn ItemsList(items: ReadSignal<Vec<Item>>, set_items: WriteSignal<Vec<Item>>, on_add_item: impl Fn() + 'static, ) -> impl IntoView {
     let (wikidata_data, set_wikidata_data) = create_signal(Vec::<Option<WikidataEntity>>::new());
 
-     // Fetch additional data from Wikidata for selected items
-     let fetch_wikidata = move || {
-        let selected_indices = selected_items_signal.get();
-        let selected_items: Vec<Item> = selected_indices
-            .iter()
-            .map(|&i| items.get()[i].clone())
-            .collect();
-
-        
-        // Wrap `selected_items` in an `Arc` so it can be cloned
-        let selected_items = Arc::new(selected_items);
-
-        // Clone selected_items before the async block to avoid borrowing issues
-        let selected_items_clone: Arc<Vec<Item>> = Arc::clone(&selected_items);
-
-        // For each selected item, fetch Wikidata attributes
-        let futures = selected_items_clone.iter().map(move |item| {
-            let wikidata_id = item.wikidata_id.clone();
-            async move {
-                if let Some(id) = wikidata_id {
-                    let url = format!("https://www.wikidata.org/wiki/Special:EntityData/{}.json", id);
-                    match Request::get(&url).send().await {
-                        Ok(response) => match response.json::<WikidataResponse>().await {
-                            Ok(parsed_data) => parsed_data.entities.get(&id).cloned(),
-                            Err(_) => None,
-                        },
-                        Err(_) => None,
-                    }
-                } else {
-                    None
-                }
-            }
-        }).collect::<Vec<_>>();
-
-    
+    // Fetch data from Wikidata for a given item name
+    let fetch_wikidata = move |item_name: String| {
         spawn_local(async move {
-            let results = future::join_all(futures).await;
-            set_wikidata_data.set(results);
+            let url = format!("https://www.wikidata.org/w/api.php?action=wbsearchentities&search={}&language=en&limit=1&format=json", item_name);
+            match Request::get(&url).send().await {
+                Ok(response) => match response.json::<WikidataResponse>().await {
+                    Ok(parsed_data) => {
+                        if let Some(entity) = parsed_data.entities.values().next() {
+                            set_wikidata_data.update(|current_data| {
+                                current_data.push(Some(entity.clone()));
+                            });
+                        }
+                    }
+                    Err(_) => log!("Failed to parse response from Wikidata"),
+                },
+                Err(_) => log!("Failed to make request to Wikidata"),
+            }
         });
     };
-    
-    // Function to toggle selection of an item
-    let toggle_selection = move |i: usize| {
-        set_selected_items.update(|items| {
-            if items.contains(&i) {
-                items.retain(|&x| x != i);
-            } else {
-                items.push(i);
+
+    // Handle updating grid cells
+    let update_item = move |index: usize, column: &str, value: String| {
+        set_items.update(|items| {
+            if let Some(item) = items.get_mut(index) {
+                match column {
+                    "name" => item.name = value,
+                    "description" => item.description = value,
+                    "tags" => item.tags.push((value.clone(), value)), // For simplicity, adding the same value as key and value.
+                    "review" => item.reviews.push(crate::models::item::ReviewWithRating {
+                        content: value.clone(),
+                        rating: 5, // Assuming a default rating of 5
+                    }),
+                    "rating" => {
+                        if let Ok(rating) = value.parse::<u8>() {
+                            item.reviews.last_mut().map(|r| r.rating = rating);
+                        }
+                    }
+                    _ => (),
+                }
             }
         });
+    };
+
+    // Trigger add item event
+    let add_item = move |_| {
+        on_add_item(); // Call the passed closure from App to add a new item
     };
 
     view! {
         <div>
-            <h2>{ "Items" }</h2>
-            <ul>
-                {move || items.get().iter().enumerate().map(|(i, item)| view! {
-                    <li key={i.to_string()}>
-                        <label>
-                            <input
-                                type="checkbox"
-                                checked={selected_items_signal.get().contains(&i)}
-                                on:change=move |_| toggle_selection(i)
-                             />
-                             {"Select item for comparison"}
-                        </label>
-                        <div>
-                            <strong>{ &item.name }</strong> - { &item.description }
-                        </div>
-                        <ul>
-                            <h4>{ "Tags:" }</h4>
-                            {item.tags.iter().map(|(key, value)| view! {
-                                <li>{ key.clone() + ": " + value }</li>
-                            }).collect::<Vec<_>>()}
-                        </ul>
-                        <ul>
-                            <h4>{ "Reviews:" }</h4>
-                            {item.reviews.iter().map(|review| view! {
-                                <li>{ format!("Rating: {}/5 - {}", review.rating, review.content) }</li>
-                            }).collect::<Vec<_>>()}
-                        </ul>
-                    </li>
-                }).collect::<Vec<_>>() }
-            </ul>
+            <h1>{ "CompareWare" }</h1>
 
-            // Button to fetch Wikidata attributes
-            <button on:click=move |_| fetch_wikidata()>{ "Fetch External Data" }</button>
+            <button on:click=add_item>{ "Add New Item" }</button>
 
-            // Comparison Table
-            <h2>{ "Comparison Table" }</h2>
             <table>
                 <thead>
                     <tr>
-                        <th>{ "Item Name" }</th>
+                        <th>{ "Name" }</th>
                         <th>{ "Description" }</th>
                         <th>{ "Tags" }</th>
-                        <th>{ "Reviews" }</th>
-                        <th>{ "External Description (Wikidata)" }</th>
+                        <th>{ "Review" }</th>
+                        <th>{ "Rating" }</th>
                     </tr>
                 </thead>
                 <tbody>
                     {move || {
-                        let selected_indices = selected_items_signal.get();
-                        selected_indices.iter().enumerate().map(|(idx, &i)| {
-                            let item = &items.get()[i];
-                            let wikidata_entity = wikidata_data.get().get(idx).cloned().flatten();
+                        items.get().iter().enumerate().map(|(index, item)| {
                             view! {
-                                <tr key={i.to_string()}>
-                                    <td>{ &item.name }</td>
-                                    <td>{ &item.description }</td>
+                                <tr>
                                     <td>
-                                        {item.tags.iter().map(|(key, value)| view! {
-                                            <span>{ key.clone() + ": " + value + " " }</span>
-                                        }).collect::<Vec<_>>()}
-                                    </td>
-                                    <td>
-                                        {item.reviews.iter().map(|review| view! {
-                                            <span>{ format!("Rating: {}/5 ", review.rating) }</span>
-                                        }).collect::<Vec<_>>()}
-                                    </td>
-                                    <td>
-                                        {move || {
-                                            let entity = wikidata_entity.clone(); // Clone the value
-                                            match entity {
-                                                Some(entity) => entity
-                                                    .descriptions
-                                                    .as_ref()
-                                                    .and_then(|descriptions| descriptions.get("en"))
-                                                    .map(|label| label.value.clone())
-                                                    .unwrap_or_default(),
-                                                None => String::from("No description"),
+                                        <input
+                                            type="text"
+                                            value={item.name.clone()}
+                                            on:input=move |e| {
+                                                update_item(index, "name", event_target_value(&e));
+                                                fetch_wikidata(event_target_value(&e)); // Fetch Wikidata when name is entered
                                             }
-                                        }}
+                                        />
+                                    </td>
+                                    <td>
+                                        <input
+                                            type="text"
+                                            value={item.description.clone()}
+                                            on:input=move |e| update_item(index, "description", event_target_value(&e))
+                                        />
+                                    </td>
+                                    <td>
+                                        <input
+                                            type="text"
+                                            placeholder="Add tags"
+                                            on:input=move |e| update_item(index, "tags", event_target_value(&e))
+                                        />
+                                    </td>
+                                    <td>
+                                        <textarea
+                                            value={item.reviews.iter().map(|review| format!("{}: {}", review.rating, review.content)).collect::<Vec<_>>().join("\n")}
+                                            on:input=move |e| update_item(index, "review", event_target_value(&e))
+                                        />
+                                    </td>
+                                    <td>
+                                        <input
+                                            type="number"
+                                            value={item.reviews.last().map(|r| r.rating).unwrap_or(5)}
+                                            min="1" max="5"
+                                            on:input=move |e| update_item(index, "rating", event_target_value(&e))
+                                        />
                                     </td>
                                 </tr>
                             }
