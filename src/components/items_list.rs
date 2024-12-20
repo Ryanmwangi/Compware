@@ -1,144 +1,182 @@
-use crate::models::item::Item;
-use gloo_net::http::Request;
-use leptos::logging::log;
+use crate::components::editable_cell::EditableCell;
+use crate::components::tag_editor::TagEditor;
 use leptos::*;
 use serde::Deserialize;
-use std::collections::HashMap;
-use wasm_bindgen_futures::spawn_local;
+use uuid::Uuid;
 
 #[derive(Deserialize, Clone, Debug)]
-struct WikidataResponse {
-    entities: HashMap<String, WikidataEntity>,
+struct WikidataSuggestion {
+    id: String,
+    label: String,
+    description: Option<String>,
 }
 
-#[derive(Deserialize, Clone, Debug)]
-struct WikidataEntity {
-    labels: Option<HashMap<String, WikidataLabel>>,
-    descriptions: Option<HashMap<String, WikidataLabel>>,
-}
-
-#[derive(Deserialize, Clone, Debug)]
-struct WikidataLabel {
-    value: String,
+#[derive(Clone, Debug)]
+struct Item {
+    id: String,
+    name: String,
+    description: String,
+    tags: Vec<(String, String)>,
+    wikidata_id: Option<String>,
 }
 
 #[component]
-pub fn ItemsList(items: ReadSignal<Vec<Item>>, set_items: WriteSignal<Vec<Item>>, on_add_item: impl Fn() + 'static, ) -> impl IntoView {
-    let (wikidata_data, set_wikidata_data) = create_signal(Vec::<Option<WikidataEntity>>::new());
+pub fn ItemsList(
+    items: ReadSignal<Vec<Item>>,
+    set_items: WriteSignal<Vec<Item>>,
+) -> impl IntoView {
+    let (wikidata_suggestions, set_wikidata_suggestions) =
+        create_signal(Vec::<WikidataSuggestion>::new());
 
-    // Fetch data from Wikidata for a given item name
-    let fetch_wikidata = move |item_name: String| {
+    // Fetch Wikidata suggestions
+    let fetch_wikidata_suggestions = move |query: String| {
         spawn_local(async move {
-            let url = format!("https://www.wikidata.org/w/api.php?action=wbsearchentities&search={}&language=en&limit=1&format=json", item_name);
-            match Request::get(&url).send().await {
-                Ok(response) => match response.json::<WikidataResponse>().await {
-                    Ok(parsed_data) => {
-                        if let Some(entity) = parsed_data.entities.values().next() {
-                            set_wikidata_data.update(|current_data| {
-                                current_data.push(Some(entity.clone()));
-                            });
-                        }
+            if query.is_empty() {
+                set_wikidata_suggestions(Vec::new());
+                return;
+            }
+
+            let url = format!(
+                "https://www.wikidata.org/w/api.php?action=wbsearchentities&search={}&language=en&limit=5&format=json&origin=*",
+                query
+            );
+
+            match gloo_net::http::Request::get(&url).send().await {
+                Ok(response) => {
+                    if let Ok(data) = response.json::<WikidataResponse>().await {
+                        set_wikidata_suggestions(data.search);
                     }
-                    Err(_) => log!("Failed to parse response from Wikidata"),
-                },
-                Err(_) => log!("Failed to make request to Wikidata"),
+                }
+                Err(_) => log!("Failed to fetch Wikidata suggestions"),
             }
         });
     };
 
-    // Handle updating grid cells
-    let update_item = move |index: usize, column: &str, value: String| {
+    // Update item fields
+    let update_item = move |index: usize, field: &str, value: String| {
         set_items.update(|items| {
             if let Some(item) = items.get_mut(index) {
-                match column {
-                    "name" => item.name = value,
-                    "description" => item.description = value,
-                    "tags" => item.tags.push((value.clone(), value)), // For simplicity, adding the same value as key and value.
-                    "review" => item.reviews.push(crate::models::item::ReviewWithRating {
-                        content: value.clone(),
-                        rating: 5, // Assuming a default rating of 5
-                    }),
-                    "rating" => {
-                        if let Ok(rating) = value.parse::<u8>() {
-                            item.reviews.last_mut().map(|r| r.rating = rating);
-                        }
+                match field {
+                    "name" => {
+                        item.name = value.clone();
+                        fetch_wikidata_suggestions(value);
                     }
+                    "description" => item.description = value,
                     _ => (),
                 }
             }
         });
     };
 
-    // Trigger add item event
-    let add_item = move |_| {
-        on_add_item(); // Call the passed closure from App to add a new item
+    // Add a new tag to an item
+    let add_tag = move |index: usize, key: String, value: String| {
+        set_items.update(|items| {
+            if let Some(item) = items.get_mut(index) {
+                item.tags.push((key, value));
+            }
+        });
+    };
+
+    // Remove a tag from an item
+    let remove_tag = move |item_index: usize, tag_index: usize| {
+        set_items.update(|items| {
+            if let Some(item) = items.get_mut(item_index) {
+                item.tags.remove(tag_index);
+            }
+        });
+    };
+
+    // Add a new item
+    let add_item = move || {
+        set_items.update(|items| {
+            items.push(Item {
+                id: Uuid::new_v4().to_string(),
+                name: String::new(),
+                description: String::new(),
+                tags: vec![],
+                wikidata_id: None,
+            });
+        });
+    };
+
+    // Remove an item
+    let remove_item = move |index: usize| {
+        set_items.update(|items| {
+            items.remove(index);
+        });
     };
 
     view! {
         <div>
-            <h1>{ "CompareWare" }</h1>
-
+            <h1>{ "Items List" }</h1>
             <button on:click=add_item>{ "Add New Item" }</button>
-
             <table>
                 <thead>
                     <tr>
                         <th>{ "Name" }</th>
                         <th>{ "Description" }</th>
                         <th>{ "Tags" }</th>
-                        <th>{ "Review" }</th>
-                        <th>{ "Rating" }</th>
+                        <th>{ "Actions" }</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {move || {
-                        items.get().iter().enumerate().map(|(index, item)| {
-                            view! {
-                                <tr>
-                                    <td>
-                                        <input
-                                            type="text"
-                                            value={item.name.clone()}
-                                            on:input=move |e| {
-                                                update_item(index, "name", event_target_value(&e));
-                                                fetch_wikidata(event_target_value(&e)); // Fetch Wikidata when name is entered
-                                            }
-                                        />
-                                    </td>
-                                    <td>
-                                        <input
-                                            type="text"
-                                            value={item.description.clone()}
-                                            on:input=move |e| update_item(index, "description", event_target_value(&e))
-                                        />
-                                    </td>
-                                    <td>
-                                        <input
-                                            type="text"
-                                            placeholder="Add tags"
-                                            on:input=move |e| update_item(index, "tags", event_target_value(&e))
-                                        />
-                                    </td>
-                                    <td>
-                                        <textarea
-                                            value={item.reviews.iter().map(|review| format!("{}: {}", review.rating, review.content)).collect::<Vec<_>>().join("\n")}
-                                            on:input=move |e| update_item(index, "review", event_target_value(&e))
-                                        />
-                                    </td>
-                                    <td>
-                                        <input
-                                            type="number"
-                                            value={item.reviews.last().map(|r| r.rating).unwrap_or(5)}
-                                            min="1" max="5"
-                                            on:input=move |e| update_item(index, "rating", event_target_value(&e))
-                                        />
-                                    </td>
-                                </tr>
-                            }
-                        }).collect::<Vec<_>>()
-                    }}
+                    {move || items.get().iter().enumerate().map(|(index, item)| {
+                        view! {
+                            <tr>
+                                // Editable Name Field with Wikidata Integration
+                                <td>
+                                    <EditableCell
+                                        value=item.name.clone()
+                                        on_input=move |value| update_item(index, "name", value)
+                                    />
+                                    <ul>
+                                        {move || {
+                                            wikidata_suggestions.get().iter().map(|suggestion| {
+                                                view! {
+                                                    <li on:click=move |_| {
+                                                        set_items.update(|items| {
+                                                            if let Some(item) = items.get_mut(index) {
+                                                                item.wikidata_id = Some(suggestion.id.clone());
+                                                                item.name = suggestion.label.clone();
+                                                            }
+                                                        });
+                                                    }}>
+                                                        { format!("{} - {}", suggestion.label, suggestion.description.clone().unwrap_or_default()) }
+                                                    </li>
+                                                }
+                                            }).collect::<Vec<_>>()
+                                        }}
+                                    </ul>
+                                </td>
+                                // Editable Description Field
+                                <td>
+                                    <EditableCell
+                                        value=item.description.clone()
+                                        on_input=move |value| update_item(index, "description", value)
+                                    />
+                                </td>
+                                // Tag Editor
+                                <td>
+                                    <TagEditor
+                                        tags=item.tags.clone()
+                                        on_add=move |key, value| add_tag(index, key, value)
+                                        on_remove=move |tag_index| remove_tag(index, tag_index)
+                                    />
+                                </td>
+                                // Actions
+                                <td>
+                                    <button on:click=move |_| remove_item(index)>{ "Delete" }</button>
+                                </td>
+                            </tr>
+                        }
+                    }).collect::<Vec<_>>()}
                 </tbody>
             </table>
         </div>
     }
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct WikidataResponse {
+    search: Vec<WikidataSuggestion>,
 }
