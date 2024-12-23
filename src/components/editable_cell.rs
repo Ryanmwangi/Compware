@@ -9,7 +9,7 @@ pub fn EditableCell(
 
     let handle_input = move |e: web_sys::Event| {
         let new_value = event_target_value(&e);
-        set_input_value(new_value.clone());
+        set_input_value.set(new_value.clone());
         on_input(new_value);
     };
 

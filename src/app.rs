@@ -1,7 +1,7 @@
 use leptos::*;
 use leptos_meta::*;
 use crate::components::items_list::ItemsList;
-use crate::models::item::{Item, ReviewWithRating};
+use crate::models::item::Item;
 use crate::nostr::NostrClient;
 use tokio::sync::mpsc;
 use uuid::Uuid;

@@ -3,6 +3,9 @@ use crate::components::tag_editor::TagEditor;
 use leptos::*;
 use serde::Deserialize;
 use uuid::Uuid;
+use leptos::logging::log;
+use crate::models::item::Item;
+use std::sync::{Arc, Mutex};
 
 #[derive(Deserialize, Clone, Debug)]
 struct WikidataSuggestion {
@@ -11,14 +14,6 @@ struct WikidataSuggestion {
     description: Option<String>,
 }
 
-#[derive(Clone, Debug)]
-struct Item {
-    id: String,
-    name: String,
-    description: String,
-    tags: Vec<(String, String)>,
-    wikidata_id: Option<String>,
-}
 
 #[component]
 pub fn ItemsList(
@@ -32,7 +27,7 @@ pub fn ItemsList(
     let fetch_wikidata_suggestions = move |query: String| {
         spawn_local(async move {
             if query.is_empty() {
-                set_wikidata_suggestions(Vec::new());
+                set_wikidata_suggestions.set(Vec::new());
                 return;
             }
 
@@ -44,7 +39,7 @@ pub fn ItemsList(
             match gloo_net::http::Request::get(&url).send().await {
                 Ok(response) => {
                     if let Ok(data) = response.json::<WikidataResponse>().await {
-                        set_wikidata_suggestions(data.search);
+                        set_wikidata_suggestions.set(data.search);
                     }
                 }
                 Err(_) => log!("Failed to fetch Wikidata suggestions"),
@@ -87,13 +82,14 @@ pub fn ItemsList(
     };
 
     // Add a new item
-    let add_item = move || {
+    let add_item = move |_: web_sys::MouseEvent|{
         set_items.update(|items| {
             items.push(Item {
                 id: Uuid::new_v4().to_string(),
                 name: String::new(),
                 description: String::new(),
                 tags: vec![],
+                reviews:vec![],
                 wikidata_id: None,
             });
         });
@@ -131,17 +127,24 @@ pub fn ItemsList(
                                     />
                                     <ul>
                                         {move || {
-                                            wikidata_suggestions.get().iter().map(|suggestion| {
+                                            let suggestions = wikidata_suggestions.get().to_vec();
+                                            suggestions.into_iter().map(|suggestion| {
+                                                // Clone all necessary fields upfront
+                                                let label_for_click = suggestion.label.clone();
+                                                let label_for_display = suggestion.label.clone();
+                                                let description = suggestion.description.clone().unwrap_or_default();
+                                                let id = suggestion.id.clone();
+                                                                            
                                                 view! {
                                                     <li on:click=move |_| {
                                                         set_items.update(|items| {
                                                             if let Some(item) = items.get_mut(index) {
-                                                                item.wikidata_id = Some(suggestion.id.clone());
-                                                                item.name = suggestion.label.clone();
+                                                                item.wikidata_id = Some(id.clone());
+                                                                item.name = label_for_click.clone(); // Use the cloned version for updating
                                                             }
                                                         });
                                                     }>
-                                                        { format!("{} - {}", suggestion.label, suggestion.description.clone().unwrap_or_default()) }
+                                                        { format!("{} - {}", label_for_display, description) } // Use the cloned version for display
                                                     </li>
                                                     }
                                                     
@@ -161,7 +164,7 @@ pub fn ItemsList(
                                     <TagEditor
                                         tags=item.tags.clone()
                                         on_add=move |key, value| add_tag(index, key, value)
-                                        on_remove=move |tag_index| remove_tag(index, tag_index)
+                                        on_remove=Arc::new (Mutex:: new (move |tag_index:usize| remove_tag(index, tag_index)))
                                     />
                                 </td>
                                 // Actions
