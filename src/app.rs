@@ -28,28 +28,25 @@ pub fn App() -> impl IntoView {
         }
     });
 
-    // Function to add a new item from the grid
-    let add_item_from_grid = move || {
-        let new_id = Uuid::new_v4().to_string();
-    
-        set_items.update(|items| {
-            let item = Item {
-                id: new_id.clone(),
-                name: String::new(),
-                description: String::new(),
-                tags: vec![],
-                reviews: vec![],
-                wikidata_id: None,
-            };
-            items.push(item);
-        });
+    // Handle adding a new item
+    let add_item = move || {
+        let new_item = Item {
+            id: Uuid::new_v4().to_string(),
+            name: "New Item".to_string(),
+            description: String::new(),
+            tags: vec![],
+            reviews: vec![],
+            wikidata_id: None,
+        };
+        set_items.update(|items| items.push(new_item));
     };
-    
+
     view! {
         <Stylesheet href="/assets/style.css" />
         <div>
             <h1>{ "CompareWare" }</h1>
-            <ItemsList items=items_signal set_items=set_items on_add_item=add_item_from_grid />
+            <button on:click=move |_| add_item()>{ "Add New Item" }</button>
+            <ItemsList items=items_signal set_items=set_items />
         </div>
     }
 }
