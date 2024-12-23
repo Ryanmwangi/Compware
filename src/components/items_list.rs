@@ -132,19 +132,28 @@ pub fn ItemsList(
                                                 // Clone all necessary fields upfront
                                                 let label_for_click = suggestion.label.clone();
                                                 let label_for_display = suggestion.label.clone();
-                                                let description = suggestion.description.clone().unwrap_or_default();
+                                                let description_for_click = suggestion.description.clone().unwrap_or_default();
+                                                let description_for_display = suggestion.description.clone().unwrap_or_default();
                                                 let id = suggestion.id.clone();
+
+                                                // Tags for the item
+                                                let tags = vec![
+                                                    ("source".to_string(), "wikidata".to_string()),
+                                                    ("wikidata_id".to_string(), id.clone()),
+                                                ];
                                                                             
                                                 view! {
                                                     <li on:click=move |_| {
                                                         set_items.update(|items| {
                                                             if let Some(item) = items.get_mut(index) {
+                                                                item.description = description_for_click.clone(); // Update description
+                                                                item.tags.extend(tags.clone()); // Add tags
                                                                 item.wikidata_id = Some(id.clone());
                                                                 item.name = label_for_click.clone(); // Use the cloned version for updating
                                                             }
                                                         });
                                                     }>
-                                                        { format!("{} - {}", label_for_display, description) } // Use the cloned version for display
+                                                        { format!("{} - {}", label_for_display, description_for_display) } // Use the cloned version for display
                                                     </li>
                                                     }
                                                     
