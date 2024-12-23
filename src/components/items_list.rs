@@ -140,11 +140,12 @@ pub fn ItemsList(
                                                                 item.name = suggestion.label.clone();
                                                             }
                                                         });
-                                                    }}>
+                                                    }>
                                                         { format!("{} - {}", suggestion.label, suggestion.description.clone().unwrap_or_default()) }
                                                     </li>
-                                                }
-                                            }).collect::<Vec<_>>()
+                                                    }
+                                                    
+                                                }).collect::<Vec<_>>()
                                         }}
                                     </ul>
                                 </td>
