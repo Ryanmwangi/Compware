@@ -14,12 +14,22 @@ struct WikidataSuggestion {
     description: Option<String>,
 }
 
-
 #[component]
 pub fn ItemsList(
     items: ReadSignal<Vec<Item>>,
     set_items: WriteSignal<Vec<Item>>,
 ) -> impl IntoView {
+    
+    // Ensure there's an initial empty row
+    set_items.set(vec![Item {
+        id: Uuid::new_v4().to_string(),
+        name: String::new(),
+        description: String::new(),
+        tags: vec![],
+        reviews: vec![],
+        wikidata_id: None,
+    }]);
+
     let (wikidata_suggestions, set_wikidata_suggestions) =
         create_signal(Vec::<WikidataSuggestion>::new());
 
@@ -54,11 +64,25 @@ pub fn ItemsList(
                 match field {
                     "name" => {
                         item.name = value.clone();
-                        fetch_wikidata_suggestions(value);
+                        fetch_wikidata_suggestions(value.clone());
                     }
-                    "description" => item.description = value,
+                    "description" => {
+                        item.description = value.clone();
+                    }
                     _ => (),
                 }
+            }
+
+            // Automatically add a new row when editing the last row
+            if index == items.len() - 1 && !value.is_empty() {
+                items.push(Item {
+                    id: Uuid::new_v4().to_string(),
+                    name: String::new(),
+                    description: String::new(),
+                    tags: vec![],
+                    reviews: vec![],
+                    wikidata_id: None,
+                });
             }
         });
     };
@@ -81,20 +105,6 @@ pub fn ItemsList(
         });
     };
 
-    // Add a new item
-    let add_item = move |_: web_sys::MouseEvent|{
-        set_items.update(|items| {
-            items.push(Item {
-                id: Uuid::new_v4().to_string(),
-                name: String::new(),
-                description: String::new(),
-                tags: vec![],
-                reviews: vec![],
-                wikidata_id: None,
-            });
-        });
-    };
-
     // Remove an item
     let remove_item = move |index: usize| {
         set_items.update(|items| {
@@ -105,7 +115,6 @@ pub fn ItemsList(
     view! {
         <div>
             <h1>{ "Items List" }</h1>
-            <button on:click=add_item>{ "Add New Item" }</button>
             <table>
                 <thead>
                     <tr>
@@ -121,11 +130,11 @@ pub fn ItemsList(
                             <tr>
                                 // Editable Name Field with Wikidata Integration
                                 <td>
-                                        <EditableCell
-                                            value=item.name.clone()
-                                            on_input=move |value| update_item(index, "name", value)
-                                            key=format!("name-{}", index) // Unique key per cell
-                                        />
+                                    <EditableCell
+                                        value=item.name.clone()
+                                        on_input=move |value| update_item(index, "name", value)
+                                        key=format!("name-{}", index) // Unique key per cell
+                                    />
                                     <ul>
                                         {move || {
                                             let suggestions = wikidata_suggestions.get().to_vec();
@@ -141,7 +150,7 @@ pub fn ItemsList(
                                                     ("source".to_string(), "wikidata".to_string()),
                                                     ("wikidata_id".to_string(), id.clone()),
                                                 ];
-                                                                            
+
                                                 view! {
                                                     <li on:click=move |_| {
                                                         set_items.update(|items| {
@@ -162,11 +171,11 @@ pub fn ItemsList(
                                 </td>
                                 // Editable Description Field
                                 <td>
-                                        <EditableCell
-                                            value=item.description.clone()
-                                            on_input=move |value| update_item(index, "description", value)
-                                            key=format!("description-{}", index)
-                                        />
+                                    <EditableCell
+                                        value=item.description.clone()
+                                        on_input=move |value| update_item(index, "description", value)
+                                        key=format!("description-{}", index)
+                                    />
                                 </td>
                                 // Tag Editor
                                 <td>
