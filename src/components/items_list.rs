@@ -89,7 +89,7 @@ pub fn ItemsList(
                 name: String::new(),
                 description: String::new(),
                 tags: vec![],
-                reviews:vec![],
+                reviews: vec![],
                 wikidata_id: None,
             });
         });
@@ -121,15 +121,15 @@ pub fn ItemsList(
                             <tr>
                                 // Editable Name Field with Wikidata Integration
                                 <td>
-                                    <EditableCell
-                                        value=item.name.clone()
-                                        on_input=move |value| update_item(index, "name", value)
-                                    />
+                                        <EditableCell
+                                            value=item.name.clone()
+                                            on_input=move |value| update_item(index, "name", value)
+                                            key=format!("name-{}", index) // Unique key per cell
+                                        />
                                     <ul>
                                         {move || {
                                             let suggestions = wikidata_suggestions.get().to_vec();
                                             suggestions.into_iter().map(|suggestion| {
-                                                // Clone all necessary fields upfront
                                                 let label_for_click = suggestion.label.clone();
                                                 let label_for_display = suggestion.label.clone();
                                                 let description_for_click = suggestion.description.clone().unwrap_or_default();
@@ -146,34 +146,34 @@ pub fn ItemsList(
                                                     <li on:click=move |_| {
                                                         set_items.update(|items| {
                                                             if let Some(item) = items.get_mut(index) {
-                                                                item.description = description_for_click.clone(); // Update description
-                                                                item.tags.extend(tags.clone()); // Add tags
+                                                                item.description = description_for_click.clone();
+                                                                item.tags.extend(tags.clone());
                                                                 item.wikidata_id = Some(id.clone());
-                                                                item.name = label_for_click.clone(); // Use the cloned version for updating
+                                                                item.name = label_for_click.clone();
                                                             }
                                                         });
                                                     }>
-                                                        { format!("{} - {}", label_for_display, description_for_display) } // Use the cloned version for display
+                                                        { format!("{} - {}", label_for_display, description_for_display) }
                                                     </li>
-                                                    }
-                                                    
-                                                }).collect::<Vec<_>>()
+                                                }
+                                            }).collect::<Vec<_>>()
                                         }}
                                     </ul>
                                 </td>
                                 // Editable Description Field
                                 <td>
-                                    <EditableCell
-                                        value=item.description.clone()
-                                        on_input=move |value| update_item(index, "description", value)
-                                    />
+                                        <EditableCell
+                                            value=item.description.clone()
+                                            on_input=move |value| update_item(index, "description", value)
+                                            key=format!("description-{}", index)
+                                        />
                                 </td>
                                 // Tag Editor
                                 <td>
                                     <TagEditor
                                         tags=item.tags.clone()
                                         on_add=move |key, value| add_tag(index, key, value)
-                                        on_remove=Arc::new (Mutex:: new (move |tag_index:usize| remove_tag(index, tag_index)))
+                                        on_remove=Arc::new(Mutex::new(move |tag_index: usize| remove_tag(index, tag_index)))
                                     />
                                 </td>
                                 // Actions
