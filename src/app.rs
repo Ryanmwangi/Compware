@@ -18,7 +18,7 @@ pub fn App() -> impl IntoView {
 
     // Nostr client subscription for items
     spawn_local(async move {
-        let nostr_client = NostrClient::new("wss://relay.damus.io").await.unwrap();
+        let nostr_client = NostrClient::new("wss://relay.example.com").await.unwrap();
         nostr_client.subscribe_to_items(tx.clone()).await.unwrap();
 
         while let Some(content) = rx.recv().await {
