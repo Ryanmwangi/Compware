@@ -7,7 +7,7 @@ use leptos::logging::log;
 use crate::models::item::Item;
 use std::sync::{Arc, Mutex};
 use wasm_bindgen::JsCast;
-use web_sys::{FocusEvent, HtmlElement, Element, Node};
+use web_sys::{FocusEvent, HtmlElement};
 use futures_timer::Delay;
 use std::time::Duration;
 
@@ -16,11 +16,6 @@ struct WikidataSuggestion {
     id: String,
     label: String,
     description: Option<String>,
-}
-#[derive(Clone)]
-struct ActiveCell {
-    row_index: usize,
-    position: (f64, f64),
 }
 
 #[component]
@@ -39,7 +34,6 @@ pub fn ItemsList(
         wikidata_id: None,
     }]);
 
-    let (active_cell, set_active_cell) = create_signal(None::<ActiveCell>);
     let (active_cell_position, set_active_cell_position) = create_signal(None::<(f64, f64)>);
     let (active_row_index, set_active_row_index) = create_signal(None::<usize>);
     let (wikidata_suggestions, set_wikidata_suggestions) = create_signal(Vec::<WikidataSuggestion>::new());
@@ -82,16 +76,6 @@ pub fn ItemsList(
                         item.name = value.clone();
                         fetch_wikidata_suggestions(value.clone());
                         set_active_row_index.set(Some(index));
-                        // Set active cell position with validation
-                        if let Some(element) = document().get_element_by_id(&format!("name-{}", index)) {
-                            let rect = element.get_bounding_client_rect();
-                            log!("Bounding rect: {:?}", rect); // Log rect details
-                            if rect.width() > 0.0 && rect.height() > 0.0 {
-                                set_active_cell_position.set(Some((rect.left(), rect.bottom())));
-                            } else {
-                                log!("Element bounding box is not valid for popup positioning.");
-                            }
-                        }
                     }
                     "description" => {
                         item.description = value.clone();
@@ -112,6 +96,21 @@ pub fn ItemsList(
                 });
             }
         });
+    };
+
+    // Handle focus event for EditableCell
+    let handle_focus = move |index: usize, field: &str, event: FocusEvent| {
+        set_active_row_index.set(Some(index));
+        if field == "name" {
+            if let Some(target) = event.target() {
+                if let Some(element) = target.dyn_ref::<HtmlElement>() {
+                    let rect = element.get_bounding_client_rect();
+                    set_active_cell_position.set(Some((rect.left(), rect.bottom())));
+                }
+            }
+        } else {
+            set_active_cell_position.set(None);
+        }
     };
 
     // Add a new tag to an item
@@ -210,35 +209,19 @@ pub fn ItemsList(
                             <tr>
                                 // Editable Name Field with Wikidata Integration
                                 <td>
-                                    <div
-                                        on:focus=move |event: FocusEvent| {
-                                            if let Some(element) = event.target().and_then(|t| t.dyn_into::<HtmlElement>().ok()) {
-                                                let rect = element.get_bounding_client_rect();
-                                                set_active_cell.set(Some(ActiveCell {
-                                                    row_index: index,
-                                                    position: (rect.left(), rect.top() + rect.height()),
-                                                }));
-                                            }
-                                        }
-                                        on:blur=move |_| {
-                                            spawn_local(async move {
-                                                Delay::new(Duration::from_millis(100)).await;
-                                                set_active_cell.set(None);
-                                            });
-                                        }                                        
-                                    >
                                         <EditableCell
                                             value=item.name.clone()
                                             on_input=move |value| update_item(index, "name", value)
+                                            on_focus=move |event| handle_focus(index, "name", event)
                                             key=format!("name-{}", index)
                                         />
-                                    </div>
                                 </td>
                                 // Editable Description Field
                                 <td>
                                     <EditableCell
                                         value=item.description.clone()
                                         on_input=move |value| update_item(index, "description", value)
+                                        on_focus=move |event| handle_focus(index, "description", event)
                                         key=format!("description-{}", index)
                                     />
                                 </td>

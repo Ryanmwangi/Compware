@@ -1,9 +1,11 @@
 use leptos::*;
 use leptos::logging::log;
+use web_sys::FocusEvent;
 #[component]
 pub fn EditableCell(
     value: String,
     on_input: impl Fn(String) + 'static,
+    #[prop(into)] on_focus: Callback<FocusEvent>,
     #[prop(optional)] key: Option<String>, // Optional `key` prop
 ) -> impl IntoView {
     let (input_value, set_input_value) = create_signal(value.clone());
@@ -33,14 +35,15 @@ pub fn EditableCell(
         on_input(new_value);
     };
 
-    let handle_focus = move |_: web_sys::FocusEvent| {
+    let handle_focus = move |ev:FocusEvent| {
         if is_disposed.get() {
             return;
         }
         set_has_focus.set(true);
+        on_focus.call(ev);
     };
 
-    let handle_blur = move |_: web_sys::FocusEvent| {
+    let handle_blur = move |_:FocusEvent| {
         if is_disposed.get() {
             return;
         }
