@@ -10,6 +10,7 @@ use wasm_bindgen::JsCast;
 use web_sys::{FocusEvent, HtmlElement};
 use futures_timer::Delay;
 use std::time::Duration;
+use std::rc::Rc;
 
 #[derive(Deserialize, Clone, Debug)]
 struct WikidataSuggestion {
@@ -211,7 +212,7 @@ pub fn ItemsList(
                                 <td>
                                         <EditableCell
                                             value=item.name.clone()
-                                            on_input=move |value| update_item(index, "name", value)
+                                            on_input=Rc::new(move |value| update_item(index, "name", value))
                                             on_focus=move |event| handle_focus(index, "name", event)
                                             key=format!("name-{}", index)
                                         />
@@ -220,7 +221,7 @@ pub fn ItemsList(
                                 <td>
                                     <EditableCell
                                         value=item.description.clone()
-                                        on_input=move |value| update_item(index, "description", value)
+                                        on_input=Rc::new(move |value| update_item(index, "description", value))
                                         on_focus=move |event| handle_focus(index, "description", event)
                                         key=format!("description-{}", index)
                                     />
