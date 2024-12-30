@@ -8,12 +8,19 @@ use crate::models::item::Item;
 use std::sync::{Arc, Mutex};
 use wasm_bindgen::JsCast;
 use web_sys::{FocusEvent, HtmlElement, Element, Node};
+use futures_timer::Delay;
+use std::time::Duration;
 
 #[derive(Deserialize, Clone, Debug)]
 struct WikidataSuggestion {
     id: String,
     label: String,
     description: Option<String>,
+}
+#[derive(Clone)]
+struct ActiveCell {
+    row_index: usize,
+    position: (f64, f64),
 }
 
 #[component]
@@ -32,14 +39,16 @@ pub fn ItemsList(
         wikidata_id: None,
     }]);
 
+    let (active_cell, set_active_cell) = create_signal(None::<ActiveCell>);
     let (active_cell_position, set_active_cell_position) = create_signal(None::<(f64, f64)>);
     let (active_row_index, set_active_row_index) = create_signal(None::<usize>);
-    let (wikidata_suggestions, set_wikidata_suggestions) =
-        create_signal(Vec::<WikidataSuggestion>::new());
+    let (wikidata_suggestions, set_wikidata_suggestions) = create_signal(Vec::<WikidataSuggestion>::new());
+    let debounce_duration = Duration::from_millis(300);
 
     // Fetch Wikidata suggestions
     let fetch_wikidata_suggestions = move |query: String| {
         spawn_local(async move {
+            Delay::new(debounce_duration).await;
             if query.is_empty() {
                 set_wikidata_suggestions.set(Vec::new());
                 return;
@@ -56,7 +65,10 @@ pub fn ItemsList(
                         set_wikidata_suggestions.set(data.search);
                     }
                 }
-                Err(_) => log!("Failed to fetch Wikidata suggestions"),
+                Err(err) => {
+                    log!("Failed to fetch Wikidata suggestions: {:?}", err);
+                    set_wikidata_suggestions.set(Vec::new());
+                }
             }
         });
     };
@@ -70,10 +82,15 @@ pub fn ItemsList(
                         item.name = value.clone();
                         fetch_wikidata_suggestions(value.clone());
                         set_active_row_index.set(Some(index));
-                        // Set active cell position
+                        // Set active cell position with validation
                         if let Some(element) = document().get_element_by_id(&format!("name-{}", index)) {
                             let rect = element.get_bounding_client_rect();
-                            set_active_cell_position.set(Some((rect.left(), rect.bottom())));
+                            log!("Bounding rect: {:?}", rect); // Log rect details
+                            if rect.width() > 0.0 && rect.height() > 0.0 {
+                                set_active_cell_position.set(Some((rect.left(), rect.bottom())));
+                            } else {
+                                log!("Element bounding box is not valid for popup positioning.");
+                            }
                         }
                     }
                     "description" => {
@@ -129,10 +146,15 @@ pub fn ItemsList(
                     class="suggestions-popup"
                     style=move || {
                         let suggestions = wikidata_suggestions.get();
-                        let position = active_cell_position.get();
-                        if !suggestions.is_empty() && position.is_some() {
-                            let (x, y) = position.unwrap();
-                            format!("position: absolute; left: {}px; top: {}px; display: block;", x, y)
+                        if !suggestions.is_empty() {
+                            if let Some((x, y)) = active_cell_position.get() {
+                                format!(
+                                    "position: absolute; left: {}px; top: {}px; display: block; z-index: 1000;",
+                                    x, y
+                                )
+                            } else {
+                                "display: none;".to_string()
+                            }
                         } else {
                             "display: none;".to_string()
                         }
@@ -190,26 +212,20 @@ pub fn ItemsList(
                                 <td>
                                     <div
                                         on:focus=move |event: FocusEvent| {
-                                            if let Some(target) = event.target() {
-                                                // Try casting the target to Node first, then to HtmlElement
-                                                if let Some(node) = target.dyn_ref::<Node>() {
-                                                    if let Some(element_ref) = node.dyn_ref::<HtmlElement>(){
-                                                        if let Some(element) = element_ref.dyn_ref::<Element>() {
-                                                            let rect = element.get_bounding_client_rect();
-                                                            set_active_cell_position.set(Some((rect.left(), rect.top() + rect.height())));
-                                                            set_active_row_index.set(Some(index));
-                                                        } else {
-                                                            log!("Failed to cast to Element");
-                                                        }
-                                                    } else {
-                                                        log!("Target is not a valid HTML element");
-                                                    }
-                                                } else {
-                                                    log!("Target is not a valid Node");
-                                                }
+                                            if let Some(element) = event.target().and_then(|t| t.dyn_into::<HtmlElement>().ok()) {
+                                                let rect = element.get_bounding_client_rect();
+                                                set_active_cell.set(Some(ActiveCell {
+                                                    row_index: index,
+                                                    position: (rect.left(), rect.top() + rect.height()),
+                                                }));
                                             }
                                         }
-                                        on:blur=move |_| set_active_row_index.set(None)
+                                        on:blur=move |_| {
+                                            spawn_local(async move {
+                                                Delay::new(Duration::from_millis(100)).await;
+                                                set_active_cell.set(None);
+                                            });
+                                        }                                        
                                     >
                                         <EditableCell
                                             value=item.name.clone()
