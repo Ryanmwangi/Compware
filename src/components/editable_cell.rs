@@ -1,5 +1,5 @@
 use leptos::*;
-
+use leptos::logging::log;
 #[component]
 pub fn EditableCell(
     value: String,
@@ -9,17 +9,41 @@ pub fn EditableCell(
     let (input_value, set_input_value) = create_signal(value.clone());
     let (has_focus, set_has_focus) = create_signal(false); // Track focus state locally
 
+    let (is_disposed, set_disposed) = create_signal(false); // Track disposal state
+
+    // Ensure signals aren't updated after disposal
+    on_cleanup(move || {
+        log!("Component disposed");
+        set_disposed.set(true);
+    });
+
+    let log_signal_get = move |signal_name: &str| {
+        if is_disposed.get() {
+            panic!("Attempted to get disposed signal: {}", signal_name);
+        }
+    };
+
     let handle_input = move |e: web_sys::Event| {
+        log_signal_get("input_value");
+        if is_disposed.get_untracked() {
+            return;
+        }
         let new_value = event_target_value(&e);
         set_input_value.set(new_value.clone());
         on_input(new_value);
     };
 
     let handle_focus = move |_: web_sys::FocusEvent| {
+        if is_disposed.get() {
+            return;
+        }
         set_has_focus.set(true);
     };
 
     let handle_blur = move |_: web_sys::FocusEvent| {
+        if is_disposed.get() {
+            return;
+        }
         set_has_focus.set(false);
     };
 
