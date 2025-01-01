@@ -18,7 +18,8 @@ leptos_router = { version = "0.6" }
 wasm-bindgen = "=0.2.99"
 serde = { version = "1.0", features = ["derive"] }
 uuid = { version = "1.0", features = ["v4"] }
-web-sys = { version = "0.3", features = ["Event"] }
+web-sys = { version = "0.3", features = ["Event", "HtmlElement", "Window", "EventTarget", "Element", "DomRect"] }
+js-sys = "0.3"
 nostr-sdk = "0.37"
 tokio = "1"
 gloo-net = "0.5"
@@ -27,6 +28,7 @@ wasm-bindgen-futures = "0.4"
 serde_json="1.0.133"
 thiserror = "2.0.9"
 zerofrom = "0.1"
+futures-timer = "3.0.0" 
 
 [features]
 csr = ["leptos/csr", "leptos_meta/csr", "leptos_router/csr"]

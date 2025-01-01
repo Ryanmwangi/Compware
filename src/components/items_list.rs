@@ -6,6 +6,11 @@ use uuid::Uuid;
 use leptos::logging::log;
 use crate::models::item::Item;
 use std::sync::{Arc, Mutex};
+use wasm_bindgen::JsCast;
+use web_sys::{FocusEvent, HtmlElement};
+use futures_timer::Delay;
+use std::time::Duration;
+use std::rc::Rc;
 
 #[derive(Deserialize, Clone, Debug)]
 struct WikidataSuggestion {
@@ -30,12 +35,15 @@ pub fn ItemsList(
         wikidata_id: None,
     }]);
 
-    let (wikidata_suggestions, set_wikidata_suggestions) =
-        create_signal(Vec::<WikidataSuggestion>::new());
+    let (active_cell_position, set_active_cell_position) = create_signal(None::<(f64, f64)>);
+    let (active_row_index, set_active_row_index) = create_signal(None::<usize>);
+    let (wikidata_suggestions, set_wikidata_suggestions) = create_signal(Vec::<WikidataSuggestion>::new());
+    let debounce_duration = Duration::from_millis(300);
 
     // Fetch Wikidata suggestions
     let fetch_wikidata_suggestions = move |query: String| {
         spawn_local(async move {
+            Delay::new(debounce_duration).await;
             if query.is_empty() {
                 set_wikidata_suggestions.set(Vec::new());
                 return;
@@ -52,7 +60,10 @@ pub fn ItemsList(
                         set_wikidata_suggestions.set(data.search);
                     }
                 }
-                Err(_) => log!("Failed to fetch Wikidata suggestions"),
+                Err(err) => {
+                    log!("Failed to fetch Wikidata suggestions: {:?}", err);
+                    set_wikidata_suggestions.set(Vec::new());
+                }
             }
         });
     };
@@ -65,13 +76,14 @@ pub fn ItemsList(
                     "name" => {
                         item.name = value.clone();
                         fetch_wikidata_suggestions(value.clone());
+                        set_active_row_index.set(Some(index));
                     }
                     "description" => {
                         item.description = value.clone();
                     }
                     _ => (),
                 }
-            }
+            } 
 
             // Automatically add a new row when editing the last row
             if index == items.len() - 1 && !value.is_empty() {
@@ -85,6 +97,21 @@ pub fn ItemsList(
                 });
             }
         });
+    };
+
+    // Handle focus event for EditableCell
+    let handle_focus = move |index: usize, field: &str, event: FocusEvent| {
+        set_active_row_index.set(Some(index));
+        if field == "name" {
+            if let Some(target) = event.target() {
+                if let Some(element) = target.dyn_ref::<HtmlElement>() {
+                    let rect = element.get_bounding_client_rect();
+                    set_active_cell_position.set(Some((rect.left(), rect.bottom())));
+                }
+            }
+        } else {
+            set_active_cell_position.set(None);
+        }
     };
 
     // Add a new tag to an item
@@ -112,6 +139,59 @@ pub fn ItemsList(
         });
     };
 
+    // Position and render the popup
+    let render_popup = move || {
+            view! {
+                <div
+                    class="suggestions-popup"
+                    style=move || {
+                        let suggestions = wikidata_suggestions.get();
+                        if !suggestions.is_empty() {
+                            if let Some((x, y)) = active_cell_position.get() {
+                                format!(
+                                    "position: absolute; left: {}px; top: {}px; display: block; z-index: 1000;",
+                                    x, y
+                                )
+                            } else {
+                                "display: none;".to_string()
+                            }
+                        } else {
+                            "display: none;".to_string()
+                        }
+                    }
+                >
+                    <ul>
+                        {move || wikidata_suggestions.get().iter().map(|suggestion| {
+                            let label_for_click = suggestion.label.clone();
+                            let description_for_click = suggestion.description.clone().unwrap_or_default();
+                            let id = suggestion.id.clone();
+                            let label_for_display = label_for_click.clone();
+                            let description_for_display = description_for_click.clone();
+
+                            view! {
+                                <li on:click=move |_| {
+                                    if let Some(index) = active_row_index.get() {
+                                        set_items.update(|items| {
+                                            if let Some(item) = items.get_mut(index) {
+                                                item.name = label_for_click.clone();
+                                                item.description = description_for_click.clone();
+                                                item.wikidata_id = Some(id.clone());
+                                                item.tags.push(("wikidata_id".to_string(), id.clone()));
+                                            }
+                                        });
+                                    }
+                                    set_wikidata_suggestions.set(Vec::new());
+                                    set_active_cell_position.set(None);
+                                }>
+                                    {format!("{} - {}", label_for_display, description_for_display)}
+                                </li>
+                            }
+                        }).collect::<Vec<_>>()}
+                    </ul>
+                </div>
+            }
+        };
+    
     view! {
         <div>
             <h1>{ "Items List" }</h1>
@@ -130,50 +210,19 @@ pub fn ItemsList(
                             <tr>
                                 // Editable Name Field with Wikidata Integration
                                 <td>
-                                    <EditableCell
-                                        value=item.name.clone()
-                                        on_input=move |value| update_item(index, "name", value)
-                                        key=format!("name-{}", index) // Unique key per cell
-                                    />
-                                    <ul>
-                                        {move || {
-                                            let suggestions = wikidata_suggestions.get().to_vec();
-                                            suggestions.into_iter().map(|suggestion| {
-                                                let label_for_click = suggestion.label.clone();
-                                                let label_for_display = suggestion.label.clone();
-                                                let description_for_click = suggestion.description.clone().unwrap_or_default();
-                                                let description_for_display = suggestion.description.clone().unwrap_or_default();
-                                                let id = suggestion.id.clone();
-
-                                                // Tags for the item
-                                                let tags = vec![
-                                                    ("source".to_string(), "wikidata".to_string()),
-                                                    ("wikidata_id".to_string(), id.clone()),
-                                                ];
-
-                                                view! {
-                                                    <li on:click=move |_| {
-                                                        set_items.update(|items| {
-                                                            if let Some(item) = items.get_mut(index) {
-                                                                item.description = description_for_click.clone();
-                                                                item.tags.extend(tags.clone());
-                                                                item.wikidata_id = Some(id.clone());
-                                                                item.name = label_for_click.clone();
-                                                            }
-                                                        });
-                                                    }>
-                                                        { format!("{} - {}", label_for_display, description_for_display) }
-                                                    </li>
-                                                }
-                                            }).collect::<Vec<_>>()
-                                        }}
-                                    </ul>
+                                        <EditableCell
+                                            value=item.name.clone()
+                                            on_input=Rc::new(move |value| update_item(index, "name", value))
+                                            on_focus=move |event| handle_focus(index, "name", event)
+                                            key=format!("name-{}", index)
+                                        />
                                 </td>
                                 // Editable Description Field
                                 <td>
                                     <EditableCell
                                         value=item.description.clone()
-                                        on_input=move |value| update_item(index, "description", value)
+                                        on_input=Rc::new(move |value| update_item(index, "description", value))
+                                        on_focus=move |event| handle_focus(index, "description", event)
                                         key=format!("description-{}", index)
                                     />
                                 </td>
@@ -194,6 +243,7 @@ pub fn ItemsList(
                     }).collect::<Vec<_>>()}
                 </tbody>
             </table>
+            {render_popup()}
         </div>
     }
 }
