@@ -112,86 +112,99 @@ pub fn ItemsList(
         });
     };
 
+    // List of properties to display as rows
+    let properties = vec!["Name", "Description", "Tags", "Actions"];
+
     view! {
         <div>
             <h1>{ "Items List" }</h1>
             <table>
                 <thead>
                     <tr>
-                        <th>{ "Name" }</th>
-                        <th>{ "Description" }</th>
-                        <th>{ "Tags" }</th>
-                        <th>{ "Actions" }</th>
+                        <th>{ "Property" }</th>
+                        {move || items.get().iter().enumerate().map(|(index, _)| {
+                            view! {
+                                <th>{ format!("Item {}", index + 1) }</th>
+                            }
+                        }).collect::<Vec<_>>()} 
                     </tr>
                 </thead>
                 <tbody>
-                    {move || items.get().iter().enumerate().map(|(index, item)| {
+                    {properties.into_iter().map(|property| {
                         view! {
                             <tr>
-                                // Editable Name Field with Wikidata Integration
-                                <td>
-                                    <EditableCell
-                                        value=item.name.clone()
-                                        on_input=move |value| update_item(index, "name", value)
-                                        key=format!("name-{}", index) // Unique key per cell
-                                    />
-                                    <ul>
-                                        {move || {
-                                            let suggestions = wikidata_suggestions.get().to_vec();
-                                            suggestions.into_iter().map(|suggestion| {
-                                                let label_for_click = suggestion.label.clone();
-                                                let label_for_display = suggestion.label.clone();
-                                                let description_for_click = suggestion.description.clone().unwrap_or_default();
-                                                let description_for_display = suggestion.description.clone().unwrap_or_default();
-                                                let id = suggestion.id.clone();
+                                <td>{ property }</td>
+                                {move || items.get().iter().enumerate().map(|(index, item)| {
+                                    view! {
+                                        <td>
+                                            {match property {
+                                                "Name" => view! {
+                                                    <EditableCell
+                                                        value=item.name.clone()
+                                                        on_input=move |value| update_item(index, "name", value)
+                                                        key=format!("name-{}", index)
+                                                    />
+                                                    <ul>
+                                                        {move || {
+                                                            let suggestions = wikidata_suggestions.get().to_vec();
+                                                            suggestions.into_iter().map(|suggestion| {
+                                                                let label_for_click = suggestion.label.clone();
+                                                                let label_for_display = suggestion.label.clone();
+                                                                let description_for_click = suggestion.description.clone().unwrap_or_default();
+                                                                let description_for_display = suggestion.description.clone().unwrap_or_default();
+                                                                let id = suggestion.id.clone();
 
-                                                // Tags for the item
-                                                let tags = vec![
-                                                    ("source".to_string(), "wikidata".to_string()),
-                                                    ("wikidata_id".to_string(), id.clone()),
-                                                ];
+                                                                // Tags for the item
+                                                                let tags = vec![
+                                                                    ("source".to_string(), "wikidata".to_string()),
+                                                                    ("wikidata_id".to_string(), id.clone()),
+                                                                ];
 
-                                                view! {
-                                                    <li on:click=move |_| {
-                                                        set_items.update(|items| {
-                                                            if let Some(item) = items.get_mut(index) {
-                                                                item.description = description_for_click.clone();
-                                                                item.tags.extend(tags.clone());
-                                                                item.wikidata_id = Some(id.clone());
-                                                                item.name = label_for_click.clone();
-                                                            }
-                                                        });
-                                                    }>
-                                                        { format!("{} - {}", label_for_display, description_for_display) }
-                                                    </li>
-                                                }
-                                            }).collect::<Vec<_>>()
-                                        }}
-                                    </ul>
-                                </td>
-                                // Editable Description Field
-                                <td>
-                                    <EditableCell
-                                        value=item.description.clone()
-                                        on_input=move |value| update_item(index, "description", value)
-                                        key=format!("description-{}", index)
-                                    />
-                                </td>
-                                // Tag Editor
-                                <td>
-                                    <TagEditor
-                                        tags=item.tags.clone()
-                                        on_add=move |key, value| add_tag(index, key, value)
-                                        on_remove=Arc::new(Mutex::new(move |tag_index: usize| remove_tag(index, tag_index)))
-                                    />
-                                </td>
-                                // Actions
-                                <td>
-                                    <button on:click=move |_| remove_item(index)>{ "Delete" }</button>
-                                </td>
+                                                                view! {
+                                                                    <li on:click=move |_| {
+                                                                        set_items.update(|items| {
+                                                                            if let Some(item) = items.get_mut(index) {
+                                                                                item.description = description_for_click.clone();
+                                                                                item.tags.extend(tags.clone());
+                                                                                item.wikidata_id = Some(id.clone());
+                                                                                item.name = label_for_click.clone();
+                                                                            }
+                                                                        });
+                                                                    }>
+                                                                        { format!("{} - {}", label_for_display, description_for_display) }
+                                                                    </li>
+                                                                }
+                                                            }).collect::<Vec<_>>()
+                                                        }}
+                                                    </ul>
+                                                }.into_view(),
+                                                "Description" => view! {
+                                                    <EditableCell
+                                                        value=item.description.clone()
+                                                        on_input=move |value| update_item(index, "description", value)
+                                                        key=format!("description-{}", index)
+                                                    />
+                                                }.into_view(),
+                                                "Tags" => view! {
+                                                    <TagEditor
+                                                        tags=item.tags.clone()
+                                                        on_add=move |key, value| add_tag(index, key, value)
+                                                        on_remove=Arc::new(Mutex::new(move |tag_index: usize| remove_tag(index, tag_index)))
+                                                    />
+                                                }.into_view(),
+                                                "Actions" => view! {
+                                                    <button on:click=move |_| remove_item(index)>{ "Delete" }</button>
+                                                }.into_view(),
+                                                _ => view! {
+                                                    { "" }
+                                                }.into_view(),
+                                            }}
+                                        </td>
+                                    }
+                                }).collect::<Vec<_>>()}                                
                             </tr>
                         }
-                    }).collect::<Vec<_>>()}
+                    }).collect::<Vec<_>>()}                    
                 </tbody>
             </table>
         </div>
