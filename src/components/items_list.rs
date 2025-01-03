@@ -5,7 +5,9 @@ use serde::Deserialize;
 use uuid::Uuid;
 use leptos::logging::log;
 use crate::models::item::Item;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use wasm_bindgen::JsCast;
 
 #[derive(Deserialize, Clone, Debug)]
 struct WikidataSuggestion {
@@ -19,6 +21,8 @@ pub fn ItemsList(
     items: ReadSignal<Vec<Item>>,
     set_items: WriteSignal<Vec<Item>>,
 ) -> impl IntoView {
+    // State to manage dynamic property names
+    let (custom_properties, set_custom_properties) = create_signal(Vec::<String>::new());
     
     // Ensure there's an initial empty row
     set_items.set(vec![Item {
@@ -28,6 +32,7 @@ pub fn ItemsList(
         tags: vec![],
         reviews: vec![],
         wikidata_id: None,
+        custom_properties: HashMap::new(),
     }]);
 
     let (wikidata_suggestions, set_wikidata_suggestions) =
@@ -69,7 +74,10 @@ pub fn ItemsList(
                     "description" => {
                         item.description = value.clone();
                     }
-                    _ => (),
+                    _ => {
+                        // Update custom property
+                        item.custom_properties.insert(field.to_string(), value.clone());
+                    }
                 }
             }
 
@@ -82,7 +90,17 @@ pub fn ItemsList(
                     tags: vec![],
                     reviews: vec![],
                     wikidata_id: None,
+                    custom_properties: HashMap::new(),
                 });
+            }
+        });
+    };
+
+    // Add a new custom property
+    let add_property = move |property: String| {
+        set_custom_properties.update(|props| {
+            if !props.contains(&property) && !property.is_empty() {
+                props.push(property);
             }
         });
     };
@@ -100,7 +118,7 @@ pub fn ItemsList(
     let remove_tag = move |item_index: usize, tag_index: usize| {
         set_items.update(|items| {
             if let Some(item) = items.get_mut(item_index) {
-                item.tags.remove(tag_index);
+                    item.tags.remove(tag_index);
             }
         });
     };
@@ -108,7 +126,7 @@ pub fn ItemsList(
     // Remove an item
     let remove_item = move |index: usize| {
         set_items.update(|items| {
-            items.remove(index);
+                items.remove(index);
         });
     };
 
@@ -135,16 +153,16 @@ pub fn ItemsList(
                             <tr>
                                 <td>{ property }</td>
                                 {move || items.get().iter().enumerate().map(|(index, item)| {
-                                    view! {
-                                        <td>
+                                        view! {
+                                            <td>
                                             {match property {
                                                 "Name" => view! {
-                                                    <EditableCell
-                                                        value=item.name.clone()
+                                                <EditableCell
+                                                    value=item.name.clone()
                                                         on_input=move |value| update_item(index, "name", value)
                                                         key=format!("name-{}", index)
-                                                    />
-                                                    <ul>
+                                                />
+                                                <ul>
                                                         {move || {
                                                             let suggestions = wikidata_suggestions.get().to_vec();
                                                             suggestions.into_iter().map(|suggestion| {
@@ -160,37 +178,37 @@ pub fn ItemsList(
                                                                     ("wikidata_id".to_string(), id.clone()),
                                                                 ];
 
-                                                                view! {
-                                                                    <li on:click=move |_| {
-                                                                        set_items.update(|items| {
-                                                                            if let Some(item) = items.get_mut(index) {
+                                                        view! {
+                                                            <li on:click=move |_| {
+                                                                set_items.update(|items| {
+                                                                    if let Some(item) = items.get_mut(index) {
                                                                                 item.description = description_for_click.clone();
                                                                                 item.tags.extend(tags.clone());
                                                                                 item.wikidata_id = Some(id.clone());
                                                                                 item.name = label_for_click.clone();
-                                                                            }
-                                                                        });
-                                                                    }>
+                                                                    }
+                                                                });
+                                                            }>
                                                                         { format!("{} - {}", label_for_display, description_for_display) }
-                                                                    </li>
-                                                                }
+                                                            </li>
+                                                        }
                                                             }).collect::<Vec<_>>()
                                                         }}
-                                                    </ul>
+                                                </ul>
                                                 }.into_view(),
                                                 "Description" => view! {
-                                                    <EditableCell
-                                                        value=item.description.clone()
+                                                <EditableCell
+                                                    value=item.description.clone()
                                                         on_input=move |value| update_item(index, "description", value)
                                                         key=format!("description-{}", index)
-                                                    />
+                                                />
                                                 }.into_view(),
                                                 "Tags" => view! {
-                                                    <TagEditor
-                                                        tags=item.tags.clone()
+                                                <TagEditor
+                                                    tags=item.tags.clone()
                                                         on_add=move |key, value| add_tag(index, key, value)
                                                         on_remove=Arc::new(Mutex::new(move |tag_index: usize| remove_tag(index, tag_index)))
-                                                    />
+                                                />
                                                 }.into_view(),
                                                 "Actions" => view! {
                                                     <button on:click=move |_| remove_item(index)>{ "Delete" }</button>
@@ -199,14 +217,56 @@ pub fn ItemsList(
                                                     { "" }
                                                 }.into_view(),
                                             }}
-                                        </td>
-                                    }
+                                            </td>
+                                        }
                                 }).collect::<Vec<_>>()}                                
                             </tr>
                         }
-                    }).collect::<Vec<_>>()}                    
+                    }).collect::<Vec<_>>()}
+                    // Dynamically adding custom properties as columns
+                    {move || {
+                        let custom_props = custom_properties.get().clone();
+                        custom_props.into_iter().map(move |property| {
+                            let property_clone = property.clone();
+                            view! {
+                                <tr>
+                                    <td>{ property }</td>
+                                    {move || {
+                                        let property_clone = property_clone.clone(); // Clone `property_clone` again for the inner closure
+                                        items.get().iter().enumerate().map(move |(index, item)| {
+                                            let property_clone_for_closure = property_clone.clone();
+                                            view! {
+                                                <td>
+                                                    <EditableCell
+                                                        value=item.custom_properties.get(&property_clone).cloned().unwrap_or_default()
+                                                        on_input=move |value| update_item(index, &property_clone_for_closure, value)
+                                                        key=format!("custom-{}-{}", property_clone, index)
+                                                    />
+                                                </td>
+                                            }
+                                        }).collect::<Vec<_>>()
+                                    }}
+                                </tr>
+                            }
+                        }).collect::<Vec<_>>()
+                    }}
                 </tbody>
             </table>
+            <div style="margin-bottom: 20px;">
+                <input type="text" id="new-property" placeholder="Add New Property"/>
+                <button on:click=move |_| {
+                    let property = web_sys::window()
+                        .unwrap()
+                        .document()
+                        .unwrap()
+                        .get_element_by_id("new-property")
+                        .unwrap()
+                        .dyn_into::<web_sys::HtmlInputElement>()
+                        .unwrap()
+                        .value();
+                    add_property(property);
+                }>{ "Add Property" }</button>
+            </div>
         </div>
     }
 }
