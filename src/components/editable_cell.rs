@@ -1,39 +1,64 @@
 use leptos::*;
+use std::sync::Arc;
 
 #[component]
 pub fn EditableCell(
     value: String,
     on_input: impl Fn(String) + 'static,
-    #[prop(optional)] key: Option<String>, // Optional `key` prop
+    key: Arc<String>,
+    focused_cell: ReadSignal<Option<String>>,
+    set_focused_cell: WriteSignal<Option<String>>,
 ) -> impl IntoView {
     let (input_value, set_input_value) = create_signal(value.clone());
-    let (has_focus, set_has_focus) = create_signal(false); // Track focus state locally
+    let input_ref = NodeRef::<html::Input>::new();
 
+    // Handle input event
     let handle_input = move |e: web_sys::Event| {
         let new_value = event_target_value(&e);
         set_input_value.set(new_value.clone());
         on_input(new_value);
     };
 
-    let handle_focus = move |_: web_sys::FocusEvent| {
-        set_has_focus.set(true);
+    let handle_focus = {
+        let key = Arc::clone(&key);
+        move |_| {
+            set_focused_cell.set(Some(key.to_string()));
+        }
     };
 
-    let handle_blur = move |_: web_sys::FocusEvent| {
-        set_has_focus.set(false);
+    let handle_blur = move |_| {
+        set_focused_cell.set(None);
     };
 
-    // Use key to force updates only when necessary
-    let _key = key.unwrap_or_default();
+    create_effect({
+        let key = Arc::clone(&key);
+        move |_| {
+            if let Some(ref current_key) = focused_cell.get() {
+                if current_key == key.as_str() {
+                    if let Some(input) = input_ref.get() {
+                        if web_sys::window()
+                            .unwrap()
+                            .document()
+                            .unwrap()
+                            .active_element()
+                            .map_or(true, |el| !el.is_same_node(Some(input.as_ref())))
+                        {
+                            let _ = input.focus();
+                        }
+                    }
+                }
+            }
+        }
+    });
 
     view! {
         <input
             type="text"
-            value={input_value.get()}
+            prop:value={input_value}
             on:input=handle_input
             on:focus=handle_focus
             on:blur=handle_blur
-            class={if has_focus.get() { "focused" } else { "not-focused" }}
+            node_ref=input_ref
         />
     }
 }
