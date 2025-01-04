@@ -21,6 +21,9 @@ pub fn ItemsList(
     items: ReadSignal<Vec<Item>>,
     set_items: WriteSignal<Vec<Item>>,
 ) -> impl IntoView {
+    // State to track the currently focused cell
+    let (focused_cell, set_focused_cell) = create_signal(None::<String>);
+
     // State to manage dynamic property names
     let (custom_properties, set_custom_properties) = create_signal(Vec::<String>::new());
     
@@ -159,8 +162,10 @@ pub fn ItemsList(
                                                 "Name" => view! {
                                                 <EditableCell
                                                     value=item.name.clone()
-                                                        on_input=move |value| update_item(index, "name", value)
-                                                        key=format!("name-{}", index)
+                                                    on_input=move |value| update_item(index, "name", value)
+                                                    key=Arc::new(format!("name-{}", index))
+                                                    focused_cell=focused_cell
+                                                    set_focused_cell=set_focused_cell.clone()
                                                 />
                                                 <ul>
                                                         {move || {
@@ -199,15 +204,17 @@ pub fn ItemsList(
                                                 "Description" => view! {
                                                 <EditableCell
                                                     value=item.description.clone()
-                                                        on_input=move |value| update_item(index, "description", value)
-                                                        key=format!("description-{}", index)
+                                                    on_input=move |value| update_item(index, "description", value)
+                                                    key=Arc::new(format!("description-{}", index))
+                                                    focused_cell=focused_cell
+                                                    set_focused_cell=set_focused_cell.clone()
                                                 />
                                                 }.into_view(),
                                                 "Tags" => view! {
                                                 <TagEditor
                                                     tags=item.tags.clone()
-                                                        on_add=move |key, value| add_tag(index, key, value)
-                                                        on_remove=Arc::new(Mutex::new(move |tag_index: usize| remove_tag(index, tag_index)))
+                                                    on_add=move |key, value| add_tag(index, key, value)
+                                                    on_remove=Arc::new(Mutex::new(move |tag_index: usize| remove_tag(index, tag_index)))
                                                 />
                                                 }.into_view(),
                                                 "Actions" => view! {
@@ -240,7 +247,9 @@ pub fn ItemsList(
                                                     <EditableCell
                                                         value=item.custom_properties.get(&property_clone).cloned().unwrap_or_default()
                                                         on_input=move |value| update_item(index, &property_clone_for_closure, value)
-                                                        key=format!("custom-{}-{}", property_clone, index)
+                                                        key=Arc::new(format!("custom-{}-{}", property_clone, index))
+                                                        focused_cell=focused_cell
+                                                        set_focused_cell=set_focused_cell.clone()
                                                     />
                                                 </td>
                                             }
