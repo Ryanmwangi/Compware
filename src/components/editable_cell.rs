@@ -1,5 +1,6 @@
 use leptos::*;
 use std::sync::Arc;
+use leptos::logging::log;
 
 #[component]
 pub fn EditableCell(
@@ -9,44 +10,44 @@ pub fn EditableCell(
     focused_cell: ReadSignal<Option<String>>,
     set_focused_cell: WriteSignal<Option<String>>,
 ) -> impl IntoView {
-    let (input_value, set_input_value) = create_signal(value.clone());
-    let input_ref = NodeRef::<html::Input>::new();
+    let input_ref = create_node_ref::<html::Input>();
+    let (local_value, set_local_value) = create_signal(value.clone());
 
     // Handle input event
     let handle_input = move |e: web_sys::Event| {
         let new_value = event_target_value(&e);
-        set_input_value.set(new_value.clone());
-        on_input(new_value);
+        log!("Input event: {}", new_value);
+        set_local_value.set(new_value);
     };
 
+    // Commit the input value on blur or enter
+    let commit_input = move || {
+        let value = local_value.get();
+        log!("Committing input: {}", value);
+        on_input(value);
+    };
+
+    // Focus handling
     let handle_focus = {
         let key = Arc::clone(&key);
         move |_| {
+            log!("Focus gained for key: {}", key);
             set_focused_cell.set(Some(key.to_string()));
         }
     };
 
     let handle_blur = move |_| {
+        log!("Focus lost");
         set_focused_cell.set(None);
+        commit_input();
     };
 
-    create_effect({
-        let key = Arc::clone(&key);
-        move |_| {
-            if let Some(ref current_key) = focused_cell.get() {
-                if current_key == key.as_str() {
-                    if let Some(input) = input_ref.get() {
-                        if web_sys::window()
-                            .unwrap()
-                            .document()
-                            .unwrap()
-                            .active_element()
-                            .map_or(true, |el| !el.is_same_node(Some(input.as_ref())))
-                        {
-                            let _ = input.focus();
-                        }
-                    }
-                }
+    // Update input field value when focused cell changes
+    create_effect(move |_| {
+        if focused_cell.get().as_deref() == Some(key.as_str()) {
+            log!("Setting focus for key: {}", key);
+            if let Some(input) = input_ref.get() {
+                let _ = input.focus();
             }
         }
     });
@@ -54,7 +55,7 @@ pub fn EditableCell(
     view! {
         <input
             type="text"
-            prop:value={input_value}
+            value=move || local_value.get()
             on:input=handle_input
             on:focus=handle_focus
             on:blur=handle_blur
