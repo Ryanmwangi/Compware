@@ -53,13 +53,16 @@ pub fn EditableCell(
     });
 
     view! {
-        <input
-            type="text"
-            value=move || local_value.get()
-            on:input=handle_input
-            on:focus=handle_focus
-            on:blur=handle_blur
-            node_ref=input_ref
-        />
+        <div class="editable-cell">
+            <input
+                type="text"
+                prop:value=move || local_value.get()
+                on:input=handle_input
+                on:focus=handle_focus
+                on:blur=handle_blur
+                node_ref=input_ref
+                class="editable-cell-input"
+            />
+        </div>
     }
 }

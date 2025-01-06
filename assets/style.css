@@ -69,3 +69,39 @@ th, td {
 th {
     background-color: #f2f2f2;
 }
+
+/* Style for the grid container */
+.grid-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));  /* Adjust the minimum width for cells */
+    gap: 1px; /* Gap between cells */
+    background-color: #ccc;/* Grid line color  */
+    border: 1px solid #aaa; /* Outer border */
+}
+
+/* Style for individual cells */
+.editable-cell {
+    display: block;  /* Allow it to fill the parent container */
+    width: 100%;     /* Full width of the allocated space */
+    height: 100%;    /* Full height of the allocated space */
+    position: relative;
+}
+
+/* Style for the input field inside the editable cell */
+.editable-cell-input {
+    width: 100%;    /* Ensure input takes up full width */
+    height: 100%;   /* Ensure input takes up full height */
+    border: none;   /* Remove input box borders */
+    padding: 8px;   /* Add padding for spacing */
+    box-sizing: border-box; /* Ensure padding doesn't cause overflow */
+    font-size: 14px;   /* Adjust font size */
+    text-align: left;  /* Align text to the left */
+    outline: none;     /* Remove outline for better UI */
+    background-color: transparent;  /* Make background transparent */
+}
+
+/* Optional: Style for the focused input field */
+.editable-cell-input:focus {
+    background-color: #e0f7fa;  /* Light blue background when focused */
+    border: 1px solid #00796b;  /* Green border when focused */
+}
