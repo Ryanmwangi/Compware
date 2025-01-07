@@ -38,14 +38,15 @@ pub fn ItemsList(
         custom_properties: HashMap::new(),
     }]);
 
-    let (wikidata_suggestions, set_wikidata_suggestions) =
-        create_signal(Vec::<WikidataSuggestion>::new());
+    let (wikidata_suggestions, set_wikidata_suggestions) = create_signal(HashMap::<String, Vec<WikidataSuggestion>>::new());
 
     // Fetch Wikidata suggestions
-    let fetch_wikidata_suggestions = move |query: String| {
+    let fetch_wikidata_suggestions = move |key:String, query: String| {
         spawn_local(async move {
             if query.is_empty() {
-                set_wikidata_suggestions.set(Vec::new());
+                set_wikidata_suggestions.update(|suggestions| {
+                    suggestions.remove(&key);
+                });
                 return;
             }
 
@@ -57,7 +58,9 @@ pub fn ItemsList(
             match gloo_net::http::Request::get(&url).send().await {
                 Ok(response) => {
                     if let Ok(data) = response.json::<WikidataResponse>().await {
-                        set_wikidata_suggestions.set(data.search);
+                        set_wikidata_suggestions.update(|suggestions| {
+                            suggestions.insert(key, data.search);
+                        });
                     }
                 }
                 Err(_) => log!("Failed to fetch Wikidata suggestions"),
@@ -72,7 +75,7 @@ pub fn ItemsList(
                 match field {
                     "name" => {
                         item.name = value.clone();
-                        fetch_wikidata_suggestions(value.clone());
+                        fetch_wikidata_suggestions(format!("name-{}", index), value.clone());
                     }
                     "description" => {
                         item.description = value.clone();
@@ -162,14 +165,20 @@ pub fn ItemsList(
                                                 "Name" => view! {
                                                 <EditableCell
                                                     value=item.name.clone()
-                                                    on_input=move |value| update_item(index, "name", value)
+                                                    on_input=move |value| {
+                                                        update_item(index, "name", value.clone());
+                                                        fetch_wikidata_suggestions(format!("name-{}", index), value);
+                                                    }
                                                     key=Arc::new(format!("name-{}", index))
                                                     focused_cell=focused_cell
                                                     set_focused_cell=set_focused_cell.clone()
                                                 />
                                                 <ul>
                                                         {move || {
-                                                            let suggestions = wikidata_suggestions.get().to_vec();
+                                                            let suggestions = wikidata_suggestions.get()
+                                                                .get(&format!("name-{}", index))
+                                                                .cloned()
+                                                                .unwrap_or_default();
                                                             suggestions.into_iter().map(|suggestion| {
                                                                 let label_for_click = suggestion.label.clone();
                                                                 let label_for_display = suggestion.label.clone();
