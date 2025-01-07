@@ -81,10 +81,12 @@ th {
 
 /* Style for individual cells */
 .editable-cell {
-    display: block;  /* Allow it to fill the parent container */
+    display: flex;          /* Use flexbox for better layout control */
+    flex-direction: column; /* Stack children vertically */
     width: 100%;     /* Full width of the allocated space */
     height: 100%;    /* Full height of the allocated space */
-    position: relative;
+    position: relative;  /* Relative positioning for absolute children */
+    box-sizing: border-box; /* Ensure padding and border are included in width/height */
 }
 
 /* Style for the input field inside the editable cell */
@@ -100,8 +102,33 @@ th {
     background-color: transparent;  /* Make background transparent */
 }
 
-/* Optional: Style for the focused input field */
+/* Style for the focused input field */
 .editable-cell-input:focus {
     background-color: #e0f7fa;  /* Light blue background when focused */
     border: 1px solid #00796b;  /* Green border when focused */
+}
+
+/* Style for the suggestions list */
+.editable-cell-suggestions {
+    position: absolute;     /* Position suggestions absolutely within the cell */
+    top: 100%;              /* Place suggestions below the input field */
+    left: 0;                /* Align suggestions with the left edge of the cell */
+    width: 100%;            /* Full width of the cell */
+    max-height: 200px;      /* Limit height of suggestions list */
+    overflow-y: auto;       /* Add scrollbar if suggestions exceed max height */
+    background-color: white; /* White background for suggestions */
+    border: 1px solid #ddd;  /* Light border for suggestions */
+    z-index: 10;            /* Ensure suggestions appear above other content */
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Add shadow for better visibility */
+}
+
+/* Style for individual suggestion items */
+.editable-cell-suggestions li {
+    padding: 8px;           /* Add padding for spacing */
+    cursor: pointer;        /* Change cursor to pointer on hover */
+    border-bottom: 1px solid #eee; /* Add separator between items */
+}
+
+.editable-cell-suggestions li:hover {
+    background-color: #f5f5f5; /* Light gray background on hover */
 }
