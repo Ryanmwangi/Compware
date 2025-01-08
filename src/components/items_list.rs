@@ -27,6 +27,9 @@ pub fn ItemsList(
     // State to manage dynamic property names
     let (custom_properties, set_custom_properties) = create_signal(Vec::<String>::new());
     
+    // state to manage suggestions visibility
+    let (show_suggestions, set_show_suggestions) = create_signal(false);
+
     // Ensure there's an initial empty row
     set_items.set(vec![Item {
         id: Uuid::new_v4().to_string(),
@@ -42,6 +45,7 @@ pub fn ItemsList(
 
     // Fetch Wikidata suggestions
     let fetch_wikidata_suggestions = move |key:String, query: String| {
+        log!("Fetching suggestions for key: {}, query: {}", key, query);
         spawn_local(async move {
             if query.is_empty() {
                 set_wikidata_suggestions.update(|suggestions| {
@@ -58,7 +62,9 @@ pub fn ItemsList(
             match gloo_net::http::Request::get(&url).send().await {
                 Ok(response) => {
                     if let Ok(data) = response.json::<WikidataResponse>().await {
+                        log!("Fetching suggestions for key: {}, query: {}", key, query);
                         set_wikidata_suggestions.update(|suggestions| {
+                            log!("Updated suggestions: {:?}", suggestions);
                             suggestions.insert(key, data.search);
                         });
                     }
@@ -163,52 +169,80 @@ pub fn ItemsList(
                                             <td>
                                             {match property {
                                                 "Name" => view! {
-                                                <EditableCell
-                                                    value=item.name.clone()
-                                                    on_input=move |value| {
-                                                        update_item(index, "name", value.clone());
-                                                        fetch_wikidata_suggestions(format!("name-{}", index), value);
-                                                    }
-                                                    key=Arc::new(format!("name-{}", index))
-                                                    focused_cell=focused_cell
-                                                    set_focused_cell=set_focused_cell.clone()
-                                                />
-                                                <ul>
-                                                        {move || {
-                                                            let suggestions = wikidata_suggestions.get()
-                                                                .get(&format!("name-{}", index))
-                                                                .cloned()
-                                                                .unwrap_or_default();
-                                                            suggestions.into_iter().map(|suggestion| {
-                                                                let label_for_click = suggestion.label.clone();
-                                                                let label_for_display = suggestion.label.clone();
-                                                                let description_for_click = suggestion.description.clone().unwrap_or_default();
-                                                                let description_for_display = suggestion.description.clone().unwrap_or_default();
-                                                                let id = suggestion.id.clone();
-
-                                                                // Tags for the item
-                                                                let tags = vec![
-                                                                    ("source".to_string(), "wikidata".to_string()),
-                                                                    ("wikidata_id".to_string(), id.clone()),
-                                                                ];
-
-                                                        view! {
-                                                            <li on:click=move |_| {
-                                                                set_items.update(|items| {
-                                                                    if let Some(item) = items.get_mut(index) {
-                                                                                item.description = description_for_click.clone();
-                                                                                item.tags.extend(tags.clone());
-                                                                                item.wikidata_id = Some(id.clone());
-                                                                                item.name = label_for_click.clone();
-                                                                    }
+                                                    <div class="editable-cell">
+                                                        <EditableCell
+                                                            value=item.name.clone()
+                                                            on_input=move |value| {
+                                                                update_item(index, "name", value.clone());
+                                                                fetch_wikidata_suggestions(format!("name-{}", index), value);
+                                                            }
+                                                            key=Arc::new(format!("name-{}", index))
+                                                            focused_cell=focused_cell
+                                                            set_focused_cell=set_focused_cell.clone()
+                                                            on_focus=Some(Callback::new(move |_| {
+                                                                log!("Input focused, showing suggestions");
+                                                                set_show_suggestions.set(true);
+                                                            }))
+                                                            on_blur=Some(Callback::new(move |_| {
+                                                                log!("Input blurred, delaying hiding suggestions");
+                                                                spawn_local(async move {
+                                                                    gloo_timers::future::sleep(std::time::Duration::from_millis(500)).await;
+                                                                    log!("Hiding suggestions after delay");
+                                                                    set_show_suggestions.set(false);
                                                                 });
-                                                            }>
-                                                                        { format!("{} - {}", label_for_display, description_for_display) }
-                                                            </li>
-                                                        }
-                                                            }).collect::<Vec<_>>()
+                                                            }))
+                                                        />
+                                                        {move || {
+                                                            if show_suggestions.get() {
+                                                                log!("Rendering suggestions list");
+                                                                view! {
+                                                                        <ul class="editable-cell-suggestions">
+                                                                                {move || {
+                                                                                    let suggestions = wikidata_suggestions.get()
+                                                                                        .get(&format!("name-{}", index))
+                                                                                        .cloned()
+                                                                                        .unwrap_or_default();
+                                                                                    log!("Suggestions for cell {}: {:?}", index, suggestions);
+                                                                                    suggestions.into_iter().map(|suggestion| {
+                                                                                        let label_for_click = suggestion.label.clone();
+                                                                                        let label_for_display = suggestion.label.clone();
+                                                                                        let description_for_click = suggestion.description.clone().unwrap_or_default();
+                                                                                        let description_for_display = suggestion.description.clone().unwrap_or_default();
+                                                                                        let id = suggestion.id.clone();
+                                                                                    
+                                                                                        // Tags for the item
+                                                                                        let tags = vec![
+                                                                                            ("source".to_string(), "wikidata".to_string()),
+                                                                                            ("wikidata_id".to_string(), id.clone()),
+                                                                                        ];
+                                                                                    
+                                                                                view! {
+                                                                                    <li class="editable-cell-suggestions-li" on:click=move |_| {
+                                                                                        set_items.update(|items| {
+                                                                                            if let Some(item) = items.get_mut(index) {
+                                                                                                        item.description = description_for_click.clone();
+                                                                                                        item.tags.extend(tags.clone());
+                                                                                                        item.wikidata_id = Some(id.clone());
+                                                                                                        item.name = label_for_click.clone();
+                                                                                            }
+                                                                                        });
+                                                                                        set_show_suggestions.set(false);
+                                                                                    }>
+                                                                                                { format!("{} - {}", label_for_display, description_for_display) }
+                                                                                    </li>
+                                                                                }
+                                                                                    }).collect::<Vec<_>>()
+                                                                                }}
+                                                                        </ul>
+                                                                }
+                                                            } else {
+                                                                log!("Suggestions list hidden");
+                                                                view! {
+                                                                    <ul></ul>
+                                                                }
+                                                            }
                                                         }}
-                                                </ul>
+                                                    </div>
                                                 }.into_view(),
                                                 "Description" => view! {
                                                 <EditableCell
@@ -217,6 +251,12 @@ pub fn ItemsList(
                                                     key=Arc::new(format!("description-{}", index))
                                                     focused_cell=focused_cell
                                                     set_focused_cell=set_focused_cell.clone()
+                                                    on_focus=Some(Callback::new(move |_| {
+                                                        log!("Description input focused");
+                                                    }))
+                                                    on_blur=Some(Callback::new(move |_| {
+                                                        log!("Description input blurred");
+                                                    }))
                                                 />
                                                 }.into_view(),
                                                 "Tags" => view! {
@@ -259,6 +299,12 @@ pub fn ItemsList(
                                                         key=Arc::new(format!("custom-{}-{}", property_clone, index))
                                                         focused_cell=focused_cell
                                                         set_focused_cell=set_focused_cell.clone()
+                                                        on_focus=Some(Callback::new(move |_| {
+                                                            log!("Custom property input focused");
+                                                        }))
+                                                        on_blur=Some(Callback::new(move |_| {
+                                                            log!("Custom property input blurred");
+                                                        }))
                                                     />
                                                 </td>
                                             }
