@@ -29,6 +29,7 @@ pub fn App() -> impl IntoView {
 
     view! {
         <Stylesheet href="/assets/style.css" />
+        <Stylesheet href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css" />
         <div>
             <h1>{ "CompareWare" }</h1>
             <ItemsList items=items_signal set_items=set_items />

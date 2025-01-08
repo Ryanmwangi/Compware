@@ -192,6 +192,12 @@ pub fn ItemsList(
                                                                 });
                                                             }))
                                                         />
+                                                        <button class="search-icon" on:click=move |_| {
+                                                            log!("Search icon clicked, showing suggestions");
+                                                            set_show_suggestions.set(true);
+                                                        }> 
+                                                            <i class="fas fa-search"></i> Search Wiki
+                                                        </button>
                                                         {move || {
                                                             if show_suggestions.get() {
                                                                 log!("Rendering suggestions list");
