@@ -28,7 +28,7 @@ pub fn ItemsList(
     let (custom_properties, set_custom_properties) = create_signal(Vec::<String>::new());
     
     // state to manage suggestions visibility
-    let (show_suggestions, set_show_suggestions) = create_signal(false);
+    let (show_suggestions, set_show_suggestions) = create_signal(HashMap::<String, bool>::new());
 
     // Ensure there's an initial empty row
     set_items.set(vec![Item {
@@ -181,25 +181,31 @@ pub fn ItemsList(
                                                             set_focused_cell=set_focused_cell.clone()
                                                             on_focus=Some(Callback::new(move |_| {
                                                                 log!("Input focused, showing suggestions");
-                                                                set_show_suggestions.set(true);
+                                                                set_show_suggestions.update(|suggestions| {
+                                                                    suggestions.insert(format!("name-{}", index), true);
+                                                                });
                                                             }))
                                                             on_blur=Some(Callback::new(move |_| {
                                                                 log!("Input blurred, delaying hiding suggestions");
                                                                 spawn_local(async move {
                                                                     gloo_timers::future::sleep(std::time::Duration::from_millis(500)).await;
                                                                     log!("Hiding suggestions after delay");
-                                                                    set_show_suggestions.set(false);
+                                                                    set_show_suggestions.update(|suggestions| {
+                                                                        suggestions.insert(format!("name-{}", index), false);
+                                                                    });
                                                                 });
                                                             }))
                                                         />
                                                         <button class="search-icon" on:click=move |_| {
                                                             log!("Search icon clicked, showing suggestions");
-                                                            set_show_suggestions.set(true);
+                                                            set_show_suggestions.update(|suggestions| {
+                                                                suggestions.insert(format!("name-{}", index), true);
+                                                            });
                                                         }> 
                                                             <i class="fas fa-search"></i> Search Wiki
                                                         </button>
                                                         {move || {
-                                                            if show_suggestions.get() {
+                                                            if *show_suggestions.get().get(&format!("name-{}", index)).unwrap_or(&false) {
                                                                 log!("Rendering suggestions list");
                                                                 view! {
                                                                         <ul class="editable-cell-suggestions">
@@ -232,7 +238,9 @@ pub fn ItemsList(
                                                                                                         item.name = label_for_click.clone();
                                                                                             }
                                                                                         });
-                                                                                        set_show_suggestions.set(false);
+                                                                                        set_show_suggestions.update(|suggestions| {
+                                                                                            suggestions.insert(format!("name-{}", index), false);
+                                                                                        });
                                                                                     }>
                                                                                                 { format!("{} - {}", label_for_display, description_for_display) }
                                                                                     </li>
