@@ -1,4 +1,5 @@
 use crate::components::editable_cell::EditableCell;
+use crate::components::editable_cell::InputType;
 use crate::components::tag_editor::TagEditor;
 use leptos::*;
 use serde::Deserialize;
@@ -195,6 +196,7 @@ pub fn ItemsList(
                                                                     });
                                                                 });
                                                             }))
+                                                            input_type=InputType::Text
                                                         />
                                                         <button class="search-icon" on:click=move |_| {
                                                             log!("Search icon clicked, showing suggestions");
@@ -271,6 +273,7 @@ pub fn ItemsList(
                                                     on_blur=Some(Callback::new(move |_| {
                                                         log!("Description input blurred");
                                                     }))
+                                                    input_type=InputType::TextArea
                                                 />
                                                 }.into_view(),
                                                 "Tags" => view! {
@@ -319,6 +322,7 @@ pub fn ItemsList(
                                                         on_blur=Some(Callback::new(move |_| {
                                                             log!("Custom property input blurred");
                                                         }))
+                                                        input_type=InputType::TextArea
                                                     />
                                                 </td>
                                             }

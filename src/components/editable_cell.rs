@@ -11,13 +11,18 @@ pub fn EditableCell(
     set_focused_cell: WriteSignal<Option<String>>,
     on_focus: Option<Callback<()>>,
     on_blur: Option<Callback<()>>,
+    input_type: InputType,
 ) -> impl IntoView {
     let input_ref = create_node_ref::<html::Input>();
+    let textarea_ref = create_node_ref::<html::Textarea>();
     let (local_value, set_local_value) = create_signal(value.clone());
-
+    let input_type_clone = input_type.clone();
     // Handle input event
     let handle_input = move |e: web_sys::Event| {
-        let new_value = event_target_value(&e);
+        let new_value = match input_type_clone {
+            InputType::Text => event_target_value(&e),
+            InputType::TextArea => event_target_value(&e),
+        };
         log!("Input event: {}", new_value);
         set_local_value.set(new_value);
     };
@@ -62,15 +67,35 @@ pub fn EditableCell(
 
     view! {
         <div class="editable-cell">
-            <input
-                type="text"
-                prop:value=move || local_value.get()
-                on:input=handle_input
-                on:focus=handle_focus
-                on:blur=handle_blur
-                node_ref=input_ref
-                class="editable-cell-input"
-            />
+            {match input_type {
+                InputType::Text => view! {
+                    <input
+                        type="text"
+                        prop:value=move || local_value.get()
+                        on:input=handle_input
+                        on:focus=handle_focus
+                        on:blur=handle_blur
+                        node_ref=input_ref
+                        class="editable-cell-input"
+                    />
+                }.into_view(),
+                InputType::TextArea => view! {
+                    <textarea
+                        prop:value=move || local_value.get()
+                        on:input=handle_input
+                        on:focus=handle_focus
+                        on:blur=handle_blur
+                        node_ref=textarea_ref
+                        class="editable-cell-input"
+                    />
+                }.into_view()
+            }}
         </div>
     }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum InputType {
+    Text,
+    TextArea,
 }
