@@ -41,6 +41,12 @@ ssr = [
   "leptos_router/ssr",
 ]
 
+# Override secp256k1's default features
+[dependencies.secp256k1]
+version = "0.30.0"
+default-features = false
+features = ["rand"]
+
 # Defines a size-optimized profile for the WASM bundle in release mode
 [profile.wasm-release]
 inherits = "release"

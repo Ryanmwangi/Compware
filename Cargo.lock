@@ -454,7 +454,7 @@ dependencies = [
  "bitcoin_hashes 0.14.0",
  "hex-conservative 0.2.1",
  "hex_lit",
- "secp256k1",
+ "secp256k1 0.29.1",
  "serde",
 ]
 
@@ -730,6 +730,7 @@ dependencies = [
  "leptos_meta",
  "leptos_router",
  "nostr-sdk",
+ "secp256k1 0.30.0",
  "serde",
  "serde_json",
  "thiserror 2.0.9",
@@ -2550,6 +2551,16 @@ dependencies = [
  "rand",
  "secp256k1-sys",
  "serde",
+]
+
+[[package]]
+name = "secp256k1"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b50c5943d326858130af85e049f2661ba3c78b26589b8ab98e65e80ae44a1252"
+dependencies = [
+ "rand",
+ "secp256k1-sys",
 ]
 
 [[package]]
