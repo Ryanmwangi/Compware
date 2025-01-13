@@ -1,13 +1,12 @@
 use crate::components::editable_cell::EditableCell;
 use crate::components::editable_cell::InputType;
-use crate::components::tag_editor::TagEditor;
 use leptos::*;
 use serde::Deserialize;
 use uuid::Uuid;
 use leptos::logging::log;
 use crate::models::item::Item;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use wasm_bindgen::JsCast;
 
 #[derive(Deserialize, Clone, Debug)]
@@ -36,7 +35,6 @@ pub fn ItemsList(
         id: Uuid::new_v4().to_string(),
         name: String::new(),
         description: String::new(),
-        tags: vec![],
         reviews: vec![],
         wikidata_id: None,
         custom_properties: HashMap::new(),
@@ -100,7 +98,6 @@ pub fn ItemsList(
                     id: Uuid::new_v4().to_string(),
                     name: String::new(),
                     description: String::new(),
-                    tags: vec![],
                     reviews: vec![],
                     wikidata_id: None,
                     custom_properties: HashMap::new(),
@@ -118,24 +115,6 @@ pub fn ItemsList(
         });
     };
 
-    // Add a new tag to an item
-    let add_tag = move |index: usize, key: String, value: String| {
-        set_items.update(|items| {
-            if let Some(item) = items.get_mut(index) {
-                item.tags.push((key, value));
-            }
-        });
-    };
-
-    // Remove a tag from an item
-    let remove_tag = move |item_index: usize, tag_index: usize| {
-        set_items.update(|items| {
-            if let Some(item) = items.get_mut(item_index) {
-                    item.tags.remove(tag_index);
-            }
-        });
-    };
-
     // Remove an item
     let remove_item = move |index: usize| {
         set_items.update(|items| {
@@ -144,7 +123,7 @@ pub fn ItemsList(
     };
 
     // List of properties to display as rows
-    let properties = vec!["Name", "Description", "Tags", "Actions"];
+    let properties = vec!["Name", "Description", "Actions"];
 
     view! {
         <div>
@@ -222,20 +201,12 @@ pub fn ItemsList(
                                                                                         let label_for_display = suggestion.label.clone();
                                                                                         let description_for_click = suggestion.description.clone().unwrap_or_default();
                                                                                         let description_for_display = suggestion.description.clone().unwrap_or_default();
-                                                                                        let id = suggestion.id.clone();
-                                                                                    
-                                                                                        // Tags for the item
-                                                                                        let tags = vec![
-                                                                                            ("source".to_string(), "wikidata".to_string()),
-                                                                                            ("wikidata_id".to_string(), id.clone()),
-                                                                                        ];
-                                                                                    
+                                                                                        let id = suggestion.id.clone();                                                                                    
                                                                                 view! {
                                                                                     <li class="editable-cell-suggestions-li" on:click=move |_| {
                                                                                         set_items.update(|items| {
                                                                                             if let Some(item) = items.get_mut(index) {
                                                                                                         item.description = description_for_click.clone();
-                                                                                                        item.tags.extend(tags.clone());
                                                                                                         item.wikidata_id = Some(id.clone());
                                                                                                         item.name = label_for_click.clone();
                                                                                             }
@@ -274,13 +245,6 @@ pub fn ItemsList(
                                                         log!("Description input blurred");
                                                     }))
                                                     input_type=InputType::TextArea
-                                                />
-                                                }.into_view(),
-                                                "Tags" => view! {
-                                                <TagEditor
-                                                    tags=item.tags.clone()
-                                                    on_add=move |key, value| add_tag(index, key, value)
-                                                    on_remove=Arc::new(Mutex::new(move |tag_index: usize| remove_tag(index, tag_index)))
                                                 />
                                                 }.into_view(),
                                                 "Actions" => view! {

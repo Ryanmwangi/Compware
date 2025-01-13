@@ -7,7 +7,6 @@ pub struct Item {
     pub id: String,
     pub name: String,
     pub description: String,
-    pub tags: Vec<(String, String)>,
     pub reviews: Vec<ReviewWithRating>,
     pub wikidata_id: Option<String>,
     pub custom_properties: HashMap<String, String>,
