@@ -27,84 +27,32 @@ CompareWare is an open-source platform for comparing tools (software, hardware, 
    ```
 3. Open your browser at [http://localhost:3000](http://localhost:3000)
 
-## **Roadmap**
+### **Collaboration**
+We welcome contributions! Here’s how you can help:
 
-1. **Item Management** (In progress)
-   - Implement a form (`item_form.rs`) to allow users to add new items with metadata and key-value tags.
-   - Create a listing component (`items_list.rs`) to display and manage added items.
-   - Add backend functionality to validate and persist items using the Leptos framework.
+### 1. **Contribute Code**
+   - Fork the repository and create a new branch for your feature or fix.
+   - Ensure your changes are well-tested and include documentation if necessary.
+   - Open a **pull request** describing the changes and why they are useful.
 
-2. **Nostr Integration** (In progress)
-   - Use Nostr events for decentralized data storage, mapping item data to specific Nostr event types.
-   - Authenticate users through their Nostr keys for secure and decentralized access.
-   - Enable data sharing and synchronization with Nostr-compatible clients.
+### 2. **Report Issues**
+   - If you encounter bugs or have suggestions, please open an issue on the [Issues page](https://forge.ftt.gmbh/ryanmwangi/Compware/issues).
+   - Provide as much detail as possible, including steps to reproduce the issue and relevant error messages.
 
+### 3. **Feature Suggestions**
+   - We are constantly looking to improve CompareWare. If you have ideas for new features, please share them in the Issues section.
+   - You can also help us prioritize future work by commenting or upvoting on existing feature requests.
 
-## **Compareware: Next Steps**
+### 4. **Documentation Contributions**
+   - If you spot areas in the documentation that need improvement or if you have suggestions for clearer explanations, please feel free to submit a pull request with the updates.
+   - Helping others understand the project is just as valuable as contributing code!
 
-Here’s how I intend to break down the vision into actionable steps to build upon the current codebase I’ve already built:
+### 5. **Community and Discussion**
+   - Feel free to ask questions, provide feedback, or engage in discussions related to CompareWare’s development.
 
-### **Immediate Steps**
+### 6. **Test and Review**
+   - Help by reviewing pull requests to ensure the code meets our standards and is bug-free.
+   - Test new features and provide feedback to improve their functionality and usability.
 
-#### **Basic Interface (Spreadsheet-like):**
-- Create a grid-based UI to represent items and their properties.
-- Use rows for properties and columns for items.
-- Leverage a Leptos-based table or a custom grid component for rendering.
+We appreciate any contributions that can help improve CompareWare and make it more useful for the community!
 
-#### **Autocompletion for Adding Items and Properties:**
-- Integrate Wikidata's search API to provide autocompletion for item and property inputs.
-- Add a fallback to redirect users to the Wikidata item creation page when a search fails.
-
-#### **Fetching Basic Information:**
-- Use Wikidata's REST API to fetch metadata for newly added items (e.g., description, tags, etc.).
-- Populate these fields in the spreadsheet automatically after adding an item.
-
----
-
-### **Building on the Current Code**
-
-#### **Enhance the `ItemForm` to Allow:**
-- Searching for existing items via Wikidata.
-- Displaying fetched details in the form.
-- Modify the `handle_submit` function to fetch and populate additional item details after submission.
-
-#### **Update the `App` Component to:**
-- Add a placeholder grid view using Leptos’ `view!` macro.
-- Render the comparison grid.
-- Add functionality to fetch items' properties dynamically from Wikidata.
-
-#### **Add Wikidata Autocompletion:**
-- Use Gloo's HTTP client to make calls to the Wikidata search API.
-
----
-
-### **Mid-Term Enhancements**
-
-#### **Editable Fields with Wikidata Sync:**
-- Implement field-level editing in the grid.
-- Use Wikidata's APIs to update data directly for logged-in users.
-
-#### **Subjective Properties with Nostr Integration:**
-- Add a toggle for "objective" (Wikidata) vs. "subjective" (Nostr-backed) properties.
-- Store subjective properties locally first and publish them to a Nostr relay for decentralized edits.
-
-#### **Cache Mechanism:**
-- Use a lightweight database (e.g., SQLite or a key-value store like Redis) as a cache for frequently accessed items and properties.
-- Implement cache invalidation for edits to ensure the latest data is fetched.
-
----
-
-### **Advanced Features**
-
-#### **Advanced Filtering and Sorting:**
-- Add functionality to filter items by tags or properties.
-- Enable sorting by property values.
-
-#### **Item Suggestions:**
-- Based on properties and tags, suggest items for comparison.
-
-#### **Collaborative Comparison:**
-- Enable real-time collaboration with WebSockets, allowing users to view and edit comparisons together.
-
-#### **Export/Share Comparison:**
-- Add options to export the comparison as a CSV or share it via a unique link.
