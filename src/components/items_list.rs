@@ -31,14 +31,16 @@ pub fn ItemsList(
     let (show_suggestions, set_show_suggestions) = create_signal(HashMap::<String, bool>::new());
 
     // Ensure there's an initial empty row
-    set_items.set(vec![Item {
-        id: Uuid::new_v4().to_string(),
-        name: String::new(),
-        description: String::new(),
-        reviews: vec![],
-        wikidata_id: None,
-        custom_properties: HashMap::new(),
-    }]);
+    if items.get().is_empty() {
+        set_items.set(vec![Item {
+            id: Uuid::new_v4().to_string(),
+            name: String::new(),
+            description: String::new(),
+            reviews: vec![],
+            wikidata_id: None,
+            custom_properties: HashMap::new(),
+        }]);
+    }
 
     let (wikidata_suggestions, set_wikidata_suggestions) = create_signal(HashMap::<String, Vec<WikidataSuggestion>>::new());
 
@@ -73,6 +75,60 @@ pub fn ItemsList(
         });
     };
 
+    //function to fetch properties
+    async fn fetch_item_properties(wikidata_id: &str) -> HashMap<String, String> {
+        let url = format!(
+            "https://www.wikidata.org/wiki/Special:EntityData/{}.json",
+            wikidata_id
+        );
+    
+        match gloo_net::http::Request::get(&url).send().await {
+            Ok(response) => {
+                if let Ok(data) = response.json::<serde_json::Value>().await {
+                    if let Some(entities) = data["entities"].as_object() {
+                        if let Some(entity) = entities.get(wikidata_id) {
+                            if let Some(claims) = entity["claims"].as_object() {
+                                let mut result = HashMap::new();
+                                for (property, values) in claims {
+                                    if let Some(value) = values[0]["mainsnak"]["datavalue"]["value"].as_str() {
+                                        result.insert(property.clone(), value.to_string());
+                                    } else if let Some(value) = values[0]["mainsnak"]["datavalue"]["value"].as_object() {
+                                        result.insert(property.clone(), serde_json::to_string(value).unwrap());
+                                    } else if let Some(value) = values[0]["mainsnak"]["datavalue"]["value"].as_f64() {
+                                        result.insert(property.clone(), value.to_string());
+                                    } else {
+                                        result.insert(property.clone(), "Unsupported data type".to_string());
+                                    }
+                                }
+                                log!("Fetched properties for Wikidata ID {}: {:?}", wikidata_id, result);
+                                return result;
+                            }
+                        }
+                    }
+                }
+            }
+            Err(err) => log!("Error fetching item properties: {:?}", err),
+        }
+    
+        HashMap::new()
+    }
+            
+    
+    // Add a new custom property
+    let add_property = move |property: String| {
+        set_custom_properties.update(|props| {
+            if !props.contains(&property) && !property.is_empty() {
+                props.push(property.clone());
+                // Ensure the grid updates reactively
+                set_items.update(|items| {
+                    for item in items {
+                        item.custom_properties.entry(property.clone()).or_insert_with(|| "".to_string());
+                    }
+                });
+            }
+        });
+    };
+    
     // Update item fields
     let update_item = move |index: usize, field: &str, value: String| {
         set_items.update(|items| {
@@ -81,6 +137,34 @@ pub fn ItemsList(
                     "name" => {
                         item.name = value.clone();
                         fetch_wikidata_suggestions(format!("name-{}", index), value.clone());
+
+                        // Fetch Wikidata properties if the item has a valid Wikidata ID
+                        if !value.is_empty() {
+                            if let Some(wikidata_id) = &item.wikidata_id {
+                                let index = index.clone();
+                                let wikidata_id = wikidata_id.clone();
+                                let set_items = set_items.clone();
+                                let add_property = add_property.clone();
+                                
+                                spawn_local(async move {
+                                    let properties = fetch_item_properties(&wikidata_id).await;
+    
+                                    // Use `update` to modify the signal's value
+                                    set_items.update(|items| {
+                                        if let Some(item) = items.get_mut(index) {
+                                            log!("Updating item with new properties: {:?}", properties);
+                                            for (key, val) in properties {
+                                                if !item.custom_properties.contains_key(&key) {
+                                                    item.custom_properties.insert(key.clone(), val.clone());
+                                                    add_property(key);  // Dynamically add the property to the grid
+                                                }
+                                            }
+                                            log!("Updated item: {:?}", item);
+                                        }
+                                    });
+                                });
+                            }
+                        }
                     }
                     "description" => {
                         item.description = value.clone();
@@ -103,17 +187,10 @@ pub fn ItemsList(
                     custom_properties: HashMap::new(),
                 });
             }
+            log!("Items updated: {:?}", items);
         });
     };
 
-    // Add a new custom property
-    let add_property = move |property: String| {
-        set_custom_properties.update(|props| {
-            if !props.contains(&property) && !property.is_empty() {
-                props.push(property);
-            }
-        });
-    };
 
     // Remove an item
     let remove_item = move |index: usize| {
@@ -141,6 +218,7 @@ pub fn ItemsList(
                 </thead>
                 <tbody>
                     {properties.into_iter().map(|property| {
+                        log!("Rendering property: {}", property);
                         view! {
                             <tr>
                                 <td>{ property }</td>
@@ -204,6 +282,7 @@ pub fn ItemsList(
                                                                                         let id = suggestion.id.clone();                                                                                    
                                                                                 view! {
                                                                                     <li class="editable-cell-suggestions-li" on:click=move |_| {
+                                                                                        // Update item with basic suggestion details
                                                                                         set_items.update(|items| {
                                                                                             if let Some(item) = items.get_mut(index) {
                                                                                                         item.description = description_for_click.clone();
@@ -211,6 +290,27 @@ pub fn ItemsList(
                                                                                                         item.name = label_for_click.clone();
                                                                                             }
                                                                                         });
+
+                                                                                        // Fetch additional properties from Wikidata
+                                                                                        let wikidata_id = id.clone();
+                                                                                        spawn_local(async move {
+                                                                                            let properties = fetch_item_properties(&wikidata_id).await;
+                                                                                            set_items.update(|items| {
+                                                                                                if let Some(item) = items.get_mut(index) {
+                                                                                                    log!("Updating item with new properties: {:?}", properties);
+                                                                                                    // Insert new properties into the item
+                                                                                                    for (key, val) in properties {
+                                                                                                        // Check if the property already exists
+                                                                                                        if !item.custom_properties.contains_key(&key) {
+                                                                                                            item.custom_properties.insert(key.clone(), val.clone());
+                                                                                                            add_property(key);  // Dynamically add the property to the grid
+                                                                                                        }
+                                                                                                    }
+                                                                                                }
+                                                                                            });
+                                                                                        });
+
+                                                                                        // Hide the suggestion list
                                                                                         set_show_suggestions.update(|suggestions| {
                                                                                             suggestions.insert(format!("name-{}", index), false);
                                                                                         });
