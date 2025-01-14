@@ -29,7 +29,10 @@ pub fn ItemsList(
     
     // state to manage suggestions visibility
     let (show_suggestions, set_show_suggestions) = create_signal(HashMap::<String, bool>::new());
-
+    
+    // cache to store fetched properties
+    let (fetched_properties, set_fetched_properties) = create_signal(HashMap::<String, String>::new());
+   
     // Ensure there's an initial empty row
     if items.get().is_empty() {
         set_items.set(vec![Item {
@@ -76,7 +79,7 @@ pub fn ItemsList(
     };
 
     //function to fetch properties
-    async fn fetch_item_properties(wikidata_id: &str) -> HashMap<String, String> {
+    async fn fetch_item_properties(wikidata_id: &str, set_fetched_properties: WriteSignal<HashMap<String, String>>) -> HashMap<String, String> {
         let url = format!(
             "https://www.wikidata.org/wiki/Special:EntityData/{}.json",
             wikidata_id
@@ -100,7 +103,11 @@ pub fn ItemsList(
                                         result.insert(property.clone(), "Unsupported data type".to_string());
                                     }
                                 }
-                                log!("Fetched properties for Wikidata ID {}: {:?}", wikidata_id, result);
+                                set_fetched_properties.update(|properties| {
+                                    for (key, val) in result.clone() {
+                                        properties.insert(key.clone(), val.clone());
+                                    }
+                                });
                                 return result;
                             }
                         }
@@ -127,6 +134,14 @@ pub fn ItemsList(
                 });
             }
         });
+        // Populate the value of the property in the corresponding cell
+        set_items.update(|items| {
+            for item in items {
+                if let Some(value) = fetched_properties.get().get(&property) {
+                    item.custom_properties.insert(property.clone(), value.clone());
+                }
+            }
+        });
     };
     
     // Update item fields
@@ -138,30 +153,14 @@ pub fn ItemsList(
                         item.name = value.clone();
                         fetch_wikidata_suggestions(format!("name-{}", index), value.clone());
 
-                        // Fetch Wikidata properties if the item has a valid Wikidata ID
+                        // Fetch Wikidata properties if the field is "name" and the item has a valid Wikidata ID
                         if !value.is_empty() {
                             if let Some(wikidata_id) = &item.wikidata_id {
-                                let index = index.clone();
                                 let wikidata_id = wikidata_id.clone();
-                                let set_items = set_items.clone();
-                                let add_property = add_property.clone();
-                                
+                                let set_fetched_properties = set_fetched_properties.clone(); // Clone the set_fetched_properties signal
                                 spawn_local(async move {
-                                    let properties = fetch_item_properties(&wikidata_id).await;
-    
-                                    // Use `update` to modify the signal's value
-                                    set_items.update(|items| {
-                                        if let Some(item) = items.get_mut(index) {
-                                            log!("Updating item with new properties: {:?}", properties);
-                                            for (key, val) in properties {
-                                                if !item.custom_properties.contains_key(&key) {
-                                                    item.custom_properties.insert(key.clone(), val.clone());
-                                                    add_property(key);  // Dynamically add the property to the grid
-                                                }
-                                            }
-                                            log!("Updated item: {:?}", item);
-                                        }
-                                    });
+                                    let properties = fetch_item_properties(&wikidata_id, set_fetched_properties).await;
+                                    log!("Fetched properties for index {}: {:?}", index, properties);
                                 });
                             }
                         }
@@ -285,37 +284,26 @@ pub fn ItemsList(
                                                                                         // Update item with basic suggestion details
                                                                                         set_items.update(|items| {
                                                                                             if let Some(item) = items.get_mut(index) {
-                                                                                                        item.description = description_for_click.clone();
-                                                                                                        item.wikidata_id = Some(id.clone());
-                                                                                                        item.name = label_for_click.clone();
+                                                                                                item.description = description_for_click.clone();
+                                                                                                item.wikidata_id = Some(id.clone());
+                                                                                                item.name = label_for_click.clone();
                                                                                             }
                                                                                         });
 
                                                                                         // Fetch additional properties from Wikidata
                                                                                         let wikidata_id = id.clone();
                                                                                         spawn_local(async move {
-                                                                                            let properties = fetch_item_properties(&wikidata_id).await;
-                                                                                            set_items.update(|items| {
-                                                                                                if let Some(item) = items.get_mut(index) {
-                                                                                                    log!("Updating item with new properties: {:?}", properties);
-                                                                                                    // Insert new properties into the item
-                                                                                                    for (key, val) in properties {
-                                                                                                        // Check if the property already exists
-                                                                                                        if !item.custom_properties.contains_key(&key) {
-                                                                                                            item.custom_properties.insert(key.clone(), val.clone());
-                                                                                                            add_property(key);  // Dynamically add the property to the grid
-                                                                                                        }
-                                                                                                    }
-                                                                                                }
-                                                                                            });
+                                                                                            let properties = fetch_item_properties(&wikidata_id, set_fetched_properties.clone()).await;
+                                                                                            log!("Fetched properties for Wikidata ID {}: {:?}", wikidata_id, properties);
                                                                                         });
 
                                                                                         // Hide the suggestion list
                                                                                         set_show_suggestions.update(|suggestions| {
                                                                                             suggestions.insert(format!("name-{}", index), false);
+                                                                                            log!("Updated show_suggestions: {:?}", suggestions);
                                                                                         });
                                                                                     }>
-                                                                                                { format!("{} - {}", label_for_display, description_for_display) }
+                                                                                        { format!("{} - {}", label_for_display, description_for_display) }
                                                                                     </li>
                                                                                 }
                                                                                     }).collect::<Vec<_>>()
@@ -399,7 +387,18 @@ pub fn ItemsList(
                 </tbody>
             </table>
             <div style="margin-bottom: 20px;">
-                <input type="text" id="new-property" placeholder="Add New Property"/>
+            <input type="text" id="new-property" placeholder="Add New Property" list="properties"/>
+                <datalist id="properties">
+                    {move || {
+                        let properties = fetched_properties.get().clone();
+                        properties.into_iter().map(|(key, _)| {
+                            let key_clone = key.clone(); 
+                            view! {
+                                <option value={key}>{key_clone}</option>
+                            }
+                        }).collect::<Vec<_>>()
+                    }}
+                </datalist>
                 <button on:click=move |_| {
                     let property = web_sys::window()
                         .unwrap()
