@@ -308,6 +308,15 @@ pub fn ItemsList(
                                                                                         spawn_local(async move {
                                                                                             let properties = fetch_item_properties(&wikidata_id, set_fetched_properties.clone()).await;
                                                                                             log!("Fetched properties for Wikidata ID {}: {:?}", wikidata_id, properties);
+                                                                                            
+                                                                                            // Populate the custom properties for the new item
+                                                                                            set_items.update(|items| {
+                                                                                                if let Some(item) = items.iter_mut().find(|item| item.wikidata_id.as_ref() == Some(&wikidata_id)) {
+                                                                                                    for (property, value) in properties {
+                                                                                                        item.custom_properties.insert(property, value);
+                                                                                                    }
+                                                                                                }
+                                                                                            });
                                                                                         });
 
                                                                                         // Hide the suggestion list
