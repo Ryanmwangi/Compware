@@ -134,11 +134,24 @@ pub fn ItemsList(
                 });
             }
         });
-        // Populate the value of the property in the corresponding cell
+        // Fetch the relevant value for each item and populate the corresponding cells
         set_items.update(|items| {
             for item in items {
-                if let Some(value) = fetched_properties.get().get(&property) {
-                    item.custom_properties.insert(property.clone(), value.clone());
+                if let Some(wikidata_id) = &item.wikidata_id {
+                    let wikidata_id = wikidata_id.clone();
+                    let set_fetched_properties = set_fetched_properties.clone();
+                    let property_clone = property.clone();
+                    spawn_local(async move {
+                        let properties = fetch_item_properties(&wikidata_id, set_fetched_properties).await;
+                        log!("Fetched properties for Wikidata ID {}: {:?}", wikidata_id, properties);
+                        if let Some(value) = properties.get(&property_clone) {
+                            set_items.update(|items| {
+                                if let Some(item) = items.iter_mut().find(|item| item.wikidata_id.as_ref().unwrap() == &wikidata_id) {
+                                    item.custom_properties.insert(property_clone.clone(), value.clone());
+                                }
+                            });
+                        }
+                    });
                 }
             }
         });
