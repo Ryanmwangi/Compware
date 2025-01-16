@@ -33,6 +33,8 @@ pub fn ItemsList(
     // cache to store fetched properties
     let (fetched_properties, set_fetched_properties) = create_signal(HashMap::<String, String>::new());
    
+    //signal to store the fetched property labels
+    let (property_labels, set_property_labels) = create_signal(HashMap::<String, String>::new());
     // Ensure there's an initial empty row
     if items.get().is_empty() {
         set_items.set(vec![Item {
@@ -79,7 +81,7 @@ pub fn ItemsList(
     };
 
     //function to fetch properties
-    async fn fetch_item_properties(wikidata_id: &str, set_fetched_properties: WriteSignal<HashMap<String, String>>) -> HashMap<String, String> {
+    async fn fetch_item_properties(wikidata_id: &str, set_fetched_properties: WriteSignal<HashMap<String, String>>, set_property_labels: WriteSignal<HashMap<String, String>>,) -> HashMap<String, String> {
         let url = format!(
             "https://www.wikidata.org/wiki/Special:EntityData/{}.json",
             wikidata_id
@@ -103,6 +105,16 @@ pub fn ItemsList(
                                         result.insert(property.clone(), "Unsupported data type".to_string());
                                     }
                                 }
+                                // Fetch labels for the properties
+                                let property_ids = result.keys().cloned().collect::<Vec<_>>();
+                                let labels = fetch_property_labels(property_ids).await;
+                                set_property_labels.update(|labels_map| {
+                                    for (key, value) in labels {
+                                        labels_map.insert(key, value);
+                                    }
+                                });
+
+                                // Update fetched properties
                                 set_fetched_properties.update(|properties| {
                                     for (key, val) in result.clone() {
                                         properties.insert(key.clone(), val.clone());
@@ -119,7 +131,33 @@ pub fn ItemsList(
     
         HashMap::new()
     }
-            
+    
+    async fn fetch_property_labels(property_ids: Vec<String>) -> HashMap<String, String> {
+        let mut property_labels = HashMap::new();
+    
+        // Construct the API URL to fetch labels for multiple properties
+        let url = format!(
+            "https://www.wikidata.org/w/api.php?action=wbgetentities&ids={}&props=labels&format=json&languages=en&origin=*",
+            property_ids.join("|")
+        );
+    
+        match gloo_net::http::Request::get(&url).send().await {
+            Ok(response) => {
+                if let Ok(data) = response.json::<serde_json::Value>().await {
+                    if let Some(entities) = data["entities"].as_object() {
+                        for (property_id, entity) in entities {
+                            if let Some(label) = entity["labels"]["en"]["value"].as_str() {
+                                property_labels.insert(property_id.clone(), label.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            Err(err) => log!("Error fetching property labels: {:?}", err),
+        }
+    
+        property_labels
+    }
     
     // Add a new custom property
     let add_property = move |property: String| {
@@ -132,6 +170,17 @@ pub fn ItemsList(
                         item.custom_properties.entry(property.clone()).or_insert_with(|| "".to_string());
                     }
                 });
+
+                // Fetch the property label
+                let property_id = property.clone();
+                spawn_local(async move {
+                    let labels = fetch_property_labels(vec![property_id.clone()]).await;
+                    set_property_labels.update(|labels_map| {
+                        if let Some(label) = labels.get(&property_id) {
+                            labels_map.insert(property_id, label.clone());
+                        }
+                    });
+                });
             }
         });
         // Fetch the relevant value for each item and populate the corresponding cells
@@ -140,9 +189,10 @@ pub fn ItemsList(
                 if let Some(wikidata_id) = &item.wikidata_id {
                     let wikidata_id = wikidata_id.clone();
                     let set_fetched_properties = set_fetched_properties.clone();
+                    let set_property_labels = set_property_labels.clone();
                     let property_clone = property.clone();
                     spawn_local(async move {
-                        let properties = fetch_item_properties(&wikidata_id, set_fetched_properties).await;
+                        let properties = fetch_item_properties(&wikidata_id, set_fetched_properties, set_property_labels).await;
                         log!("Fetched properties for Wikidata ID {}: {:?}", wikidata_id, properties);
                         if let Some(value) = properties.get(&property_clone) {
                             set_items.update(|items| {
@@ -170,9 +220,10 @@ pub fn ItemsList(
                         if !value.is_empty() {
                             if let Some(wikidata_id) = &item.wikidata_id {
                                 let wikidata_id = wikidata_id.clone();
-                                let set_fetched_properties = set_fetched_properties.clone(); // Clone the set_fetched_properties signal
+                                let set_fetched_properties = set_fetched_properties.clone();
+                                let set_property_labels = set_property_labels.clone();
                                 spawn_local(async move {
-                                    let properties = fetch_item_properties(&wikidata_id, set_fetched_properties).await;
+                                    let properties = fetch_item_properties(&wikidata_id, set_fetched_properties, set_property_labels).await;
                                     log!("Fetched properties for index {}: {:?}", index, properties);
                                 });
                             }
@@ -305,8 +356,10 @@ pub fn ItemsList(
 
                                                                                         // Fetch additional properties from Wikidata
                                                                                         let wikidata_id = id.clone();
+                                                                                        let set_fetched_properties = set_fetched_properties.clone();
+                                                                                        let set_property_labels = set_property_labels.clone();
                                                                                         spawn_local(async move {
-                                                                                            let properties = fetch_item_properties(&wikidata_id, set_fetched_properties.clone()).await;
+                                                                                            let properties = fetch_item_properties(&wikidata_id, set_fetched_properties, set_property_labels).await;
                                                                                             log!("Fetched properties for Wikidata ID {}: {:?}", wikidata_id, properties);
                                                                                             
                                                                                             // Populate the custom properties for the new item
@@ -375,9 +428,10 @@ pub fn ItemsList(
                         let custom_props = custom_properties.get().clone();
                         custom_props.into_iter().map(move |property| {
                             let property_clone = property.clone();
+                            let property_label = property_labels.get().get(&property_clone).cloned().unwrap_or_else(|| property_clone.clone());
                             view! {
                                 <tr>
-                                    <td>{ property }</td>
+                                    <td>{ property_label }</td>
                                     {move || {
                                         let property_clone = property_clone.clone(); // Clone `property_clone` again for the inner closure
                                         items.get().iter().enumerate().map(move |(index, item)| {
@@ -413,10 +467,12 @@ pub fn ItemsList(
                 <datalist id="properties">
                     {move || {
                         let properties = fetched_properties.get().clone();
+                        let property_labels = property_labels.get().clone();
                         properties.into_iter().map(|(key, _)| {
-                            let key_clone = key.clone(); 
+                            let key_clone = key.clone();
+                            let label = property_labels.get(&key_clone).cloned().unwrap_or_else(|| key_clone.clone());
                             view! {
-                                <option value={key}>{key_clone}</option>
+                                <option value={format!("{} - {}", key, label)}>{ format!("{} - {}", key, label) }</option>
                             }
                         }).collect::<Vec<_>>()
                     }}
@@ -431,7 +487,11 @@ pub fn ItemsList(
                         .dyn_into::<web_sys::HtmlInputElement>()
                         .unwrap()
                         .value();
-                    add_property(property);
+                    // Extract the coded name from the selected value
+                    let coded_name = property.split(" - ").next().unwrap_or(&property).to_string();
+                                    
+                    // Add the property using the coded name
+                    add_property(coded_name);
                 }>{ "Add Property" }</button>
             </div>
         </div>
