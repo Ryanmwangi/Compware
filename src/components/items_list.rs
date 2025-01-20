@@ -8,6 +8,8 @@ use crate::models::item::Item;
 use std::collections::HashMap;
 use std::sync::Arc;
 use wasm_bindgen::JsCast;
+#[cfg(feature = "ssr")]
+use crate::db::{Database, DbItem};
 
 #[derive(Deserialize, Clone, Debug)]
 struct WikidataSuggestion {
@@ -35,6 +37,26 @@ pub fn ItemsList(
    
     //signal to store the fetched property labels
     let (property_labels, set_property_labels) = create_signal(HashMap::<String, String>::new());
+
+    let db_path = "items.db"; // path to the database file
+    let db = Database::new(db_path).unwrap();
+    db.create_schema().unwrap();
+
+    let db_items = db.get_items().unwrap();
+    let loaded_items: Vec<Item> = db_items.into_iter().map(|db_item| {
+        Item {
+            id: db_item.id,
+            name: db_item.name,
+            description: db_item.description,
+            wikidata_id: db_item.wikidata_id,
+            custom_properties: serde_json::from_str(&db_item.custom_properties).unwrap(),
+        }
+    }).collect();
+
+    spawn_local(async move {
+        set_items.set(loaded_items);
+    });
+
     // Ensure there's an initial empty row
     if items.get().is_empty() {
         set_items.set(vec![Item {
@@ -238,6 +260,16 @@ pub fn ItemsList(
                     }
                 }
             }
+            // //update items in the database
+            // let db_item = DbItem {
+            //     id: items[index].id.clone(),
+            //     name: items[index].name.clone(),
+            //     description: items[index].description.clone(),
+            //     wikidata_id: items[index].wikidata_id.clone(),
+            //     custom_properties: serde_json::to_string(&items[index].custom_properties).unwrap(),
+            // };
+            // db.insert_item(&db_item).unwrap();
+            
 
             // Automatically add a new row when editing the last row
             if index == items.len() - 1 && !value.is_empty() {
