@@ -41,7 +41,7 @@ pub fn ItemsList(
             id: Uuid::new_v4().to_string(),
             name: String::new(),
             description: String::new(),
-            reviews: vec![],
+            // reviews: vec![],
             wikidata_id: None,
             custom_properties: HashMap::new(),
         }]);
@@ -245,7 +245,7 @@ pub fn ItemsList(
                     id: Uuid::new_v4().to_string(),
                     name: String::new(),
                     description: String::new(),
-                    reviews: vec![],
+                    // reviews: vec![],
                     wikidata_id: None,
                     custom_properties: HashMap::new(),
                 });
