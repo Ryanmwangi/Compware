@@ -31,6 +31,7 @@ thiserror = "2.0.9"
 zerofrom = "0.1"
 
 [features]
+default = ["ssr"]
 csr = ["leptos/csr", "leptos_meta/csr", "leptos_router/csr"]
 hydrate = ["leptos/hydrate", "leptos_meta/hydrate", "leptos_router/hydrate"]
 ssr = [
@@ -40,7 +41,7 @@ ssr = [
   "leptos/ssr",
   "leptos_meta/ssr",
   "leptos_router/ssr",
-  "rusqlite"
+  "dep:rusqlite"
 ]
 
 # Override secp256k1's default features

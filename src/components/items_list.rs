@@ -8,6 +8,7 @@ use crate::models::item::Item;
 use std::collections::HashMap;
 use std::sync::Arc;
 use wasm_bindgen::JsCast;
+
 #[cfg(feature = "ssr")]
 use crate::db::{Database, DbItem};
 
@@ -38,25 +39,23 @@ pub fn ItemsList(
     //signal to store the fetched property labels
     let (property_labels, set_property_labels) = create_signal(HashMap::<String, String>::new());
 
+    #[cfg(feature = "ssr")]
+    {
+    log!("SSR feature is enabled, attempting to update database...");
+    log!("Is SSR enabled? {}", cfg!(feature = "ssr"));
     let db_path = "items.db"; // path to the database file
     let db = Database::new(db_path).unwrap();
     db.create_schema().unwrap();
 
     let db_items = db.get_items().unwrap();
     let loaded_items: Vec<Item> = db_items.into_iter().map(|db_item| {
-        Item {
-            id: db_item.id,
-            name: db_item.name,
-            description: db_item.description,
-            wikidata_id: db_item.wikidata_id,
-            custom_properties: serde_json::from_str(&db_item.custom_properties).unwrap(),
-        }
+        serde_json::from_str(&db_item.custom_properties).unwrap()
     }).collect();
 
     spawn_local(async move {
         set_items.set(loaded_items);
     });
-
+    }
     // Ensure there's an initial empty row
     if items.get().is_empty() {
         set_items.set(vec![Item {
@@ -215,7 +214,7 @@ pub fn ItemsList(
                     let property_clone = property.clone();
                     spawn_local(async move {
                         let properties = fetch_item_properties(&wikidata_id, set_fetched_properties, set_property_labels).await;
-                        log!("Fetched properties for Wikidata ID {}: {:?}", wikidata_id, properties);
+                        // log!("Fetched properties for Wikidata ID {}: {:?}", wikidata_id, properties);
                         if let Some(value) = properties.get(&property_clone) {
                             set_items.update(|items| {
                                 if let Some(item) = items.iter_mut().find(|item| item.wikidata_id.as_ref().unwrap() == &wikidata_id) {
@@ -231,6 +230,8 @@ pub fn ItemsList(
     
     // Update item fields
     let update_item = move |index: usize, field: &str, value: String| {
+        log!("Updating item at index {}: {}, {}", index, field, value);
+        log!("Is SSR enabled? {}", cfg!(feature = "ssr"));
         set_items.update(|items| {
             if let Some(item) = items.get_mut(index) {
                 match field {
@@ -246,7 +247,7 @@ pub fn ItemsList(
                                 let set_property_labels = set_property_labels.clone();
                                 spawn_local(async move {
                                     let properties = fetch_item_properties(&wikidata_id, set_fetched_properties, set_property_labels).await;
-                                    log!("Fetched properties for index {}: {:?}", index, properties);
+                                    // log!("Fetched properties for index {}: {:?}", index, properties);
                                 });
                             }
                         }
@@ -260,17 +261,27 @@ pub fn ItemsList(
                     }
                 }
             }
-            // //update items in the database
-            // let db_item = DbItem {
-            //     id: items[index].id.clone(),
-            //     name: items[index].name.clone(),
-            //     description: items[index].description.clone(),
-            //     wikidata_id: items[index].wikidata_id.clone(),
-            //     custom_properties: serde_json::to_string(&items[index].custom_properties).unwrap(),
-            // };
-            // db.insert_item(&db_item).unwrap();
-            
-
+            #[cfg(feature = "ssr")]
+        {
+            log!("SSR block in update_item is executing");
+            // Update items in the database
+            let db_item = DbItem {
+                id: items[index].id.clone(),
+                name: items[index].name.clone(),
+                description: items[index].description.clone(),
+                wikidata_id: items[index].wikidata_id.clone(),
+                custom_properties: serde_json::to_string(&items[index].custom_properties).unwrap(),
+            };
+            let db = Database::new("items.db").expect("Failed to open database");
+            match db.insert_item(&db_item) {
+                Ok(_) => {
+                    log!("Item inserted successfully");
+                }
+                Err(e) => {
+                    log!("Error inserting item: {}", e);
+                }
+            }
+        }
             // Automatically add a new row when editing the last row
             if index == items.len() - 1 && !value.is_empty() {
                 items.push(Item {
@@ -392,7 +403,7 @@ pub fn ItemsList(
                                                                                         let set_property_labels = set_property_labels.clone();
                                                                                         spawn_local(async move {
                                                                                             let properties = fetch_item_properties(&wikidata_id, set_fetched_properties, set_property_labels).await;
-                                                                                            log!("Fetched properties for Wikidata ID {}: {:?}", wikidata_id, properties);
+                                                                                            // log!("Fetched properties for Wikidata ID {}: {:?}", wikidata_id, properties);
                                                                                             
                                                                                             // Populate the custom properties for the new item
                                                                                             set_items.update(|items| {
