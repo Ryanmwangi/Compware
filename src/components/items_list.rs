@@ -8,6 +8,7 @@ use crate::models::item::Item;
 use std::collections::HashMap;
 use std::sync::Arc;
 use wasm_bindgen::JsCast;
+use serde_json::json; 
 
 #[derive(Deserialize, Clone, Debug)]
 struct WikidataSuggestion {
@@ -81,52 +82,116 @@ pub fn ItemsList(
     };
 
     //function to fetch properties
-    async fn fetch_item_properties(wikidata_id: &str, set_fetched_properties: WriteSignal<HashMap<String, String>>, set_property_labels: WriteSignal<HashMap<String, String>>,) -> HashMap<String, String> {
-        let url = format!(
-            "https://www.wikidata.org/wiki/Special:EntityData/{}.json",
-            wikidata_id
-        );
-    
-        match gloo_net::http::Request::get(&url).send().await {
-            Ok(response) => {
-                if let Ok(data) = response.json::<serde_json::Value>().await {
-                    if let Some(entities) = data["entities"].as_object() {
-                        if let Some(entity) = entities.get(wikidata_id) {
-                            if let Some(claims) = entity["claims"].as_object() {
-                                let mut result = HashMap::new();
-                                for (property, values) in claims {
-                                    if let Some(value) = values[0]["mainsnak"]["datavalue"]["value"].as_str() {
-                                        result.insert(property.clone(), value.to_string());
-                                    } else if let Some(value) = values[0]["mainsnak"]["datavalue"]["value"].as_object() {
-                                        result.insert(property.clone(), serde_json::to_string(value).unwrap());
-                                    } else if let Some(value) = values[0]["mainsnak"]["datavalue"]["value"].as_f64() {
-                                        result.insert(property.clone(), value.to_string());
-                                    } else {
-                                        result.insert(property.clone(), "Unsupported data type".to_string());
-                                    }
-                                }
-                                // Fetch labels for the properties
-                                let property_ids = result.keys().cloned().collect::<Vec<_>>();
-                                let labels = fetch_property_labels(property_ids).await;
-                                set_property_labels.update(|labels_map| {
-                                    for (key, value) in labels {
-                                        labels_map.insert(key, value);
-                                    }
-                                });
-
-                                // Update fetched properties
-                                set_fetched_properties.update(|properties| {
-                                    for (key, val) in result.clone() {
-                                        properties.insert(key.clone(), val.clone());
-                                    }
-                                });
-                                return result;
+    async fn fetch_item_properties(wikidata_id: &str, set_fetched_properties: WriteSignal<HashMap<String, String>>, set_property_labels: WriteSignal<HashMap<String, String>>) -> HashMap<String, String> {
+        let query = r#"
+            query FetchReferencedItems($wikidata_id: String!) {
+                entity(id: $wikidata_id) {
+                    claims {
+                        property {
+                            id
+                            label
+                        }
+                        value {
+                            ... on Item {
+                                id
+                                label
                             }
                         }
                     }
                 }
             }
-            Err(err) => log!("Error fetching item properties: {:?}", err),
+        "#;
+    
+        let variables = json!({
+            "wikidata_id": wikidata_id,
+        });
+    
+        let request_body = json!({
+            "query": query,
+            "variables": variables,
+        });
+    
+        log!("Sending GraphQL request for Wikidata ID: {}", wikidata_id);
+        log!("Request body: {}", request_body);
+
+        let graphql_endpoint = "https://cors-anywhere.herokuapp.com/https://query.wikidata.org/graphql";
+        let request_builder = match gloo_net::http::Request::post(graphql_endpoint)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .header("Origin", "http://localhost:3000")
+            .json(&request_body)
+        {
+            Ok(builder) => builder,
+            Err(err) => {
+                log!("Failed to build request: {:?}", err);
+                return HashMap::new();
+            }
+        };
+    
+        match request_builder.send().await {
+            Ok(response) => {
+                log!("Received response for Wikidata ID: {}", wikidata_id);
+                let raw_response_text = response.text().await.unwrap_or_default(); // Log the raw response text
+                log!("Raw response text: {}", raw_response_text);
+        
+                if let Ok(data) = serde_json::from_str::<serde_json::Value>(&raw_response_text) {
+                    log!("Parsed response data: {}", data);
+        
+                    if let Some(entity) = data["data"]["entity"].as_object() {
+                        log!("Entity data found for Wikidata ID: {}", wikidata_id);
+                        let mut result = HashMap::new();
+        
+                        if let Some(claims) = entity["claims"].as_array() {
+                            log!("Claims found: {}", claims.len());
+                            for claim in claims {
+                                if let Some(property) = claim["property"].as_object() {
+                                    if let Some(property_id) = property["id"].as_str() {
+                                        log!("Property ID found: {}", property_id);
+                                        if let Some(value) = claim["value"].as_object() {
+                                            if let Some(label) = value["label"].as_str() {
+                                                log!("Label found for property {}: {}", property_id, label);
+                                                result.insert(property_id.to_string(), label.to_string());
+                                            } else {
+                                                log!("No label found for property {}", property_id);
+                                            }
+                                        } else {
+                                            log!("No value found for property {}", property_id);
+                                        }
+                                    } else {
+                                        log!("No property ID found in claim");
+                                    }
+                                } else {
+                                    log!("No property object found in claim");
+                                }
+                            }
+                        } else {
+                            log!("No claims found in entity");
+                        }
+        
+                        // Update fetched properties and labels
+                        set_fetched_properties.update(|properties| {
+                            for (key, val) in result.clone() {
+                                properties.insert(key.clone(), val.clone());
+                            }
+                        });
+                        set_property_labels.update(|labels_map| {
+                            for (key, val) in result.clone() {
+                                labels_map.insert(key.clone(), val.clone());
+                            }
+                        });
+        
+                        log!("Fetched properties for Wikidata ID {}: {:?}", wikidata_id, result);
+                        return result;
+                    } else {
+                        log!("No entity found in response data");
+                    }
+                } else {
+                    log!("Failed to parse response JSON");
+                }
+            }
+            Err(err) => {
+                log!("Error fetching item properties: {:?}", err);
+            }
         }
     
         HashMap::new()
