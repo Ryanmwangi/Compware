@@ -61,7 +61,7 @@ mod db_impl {
     }
 
     // Define a struct to represent an item in the database
-    #[derive(Debug, Deserialize, Serialize)]
+    #[derive(Debug, Deserialize, Serialize, Clone)]
     pub struct DbItem {
         pub id: String,
         pub name: String,

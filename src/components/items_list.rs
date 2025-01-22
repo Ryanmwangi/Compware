@@ -1,13 +1,14 @@
 use crate::components::editable_cell::EditableCell;
 use crate::components::editable_cell::InputType;
 use leptos::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use leptos::logging::log;
 use crate::models::item::Item;
 use std::collections::HashMap;
 use std::sync::Arc;
 use wasm_bindgen::JsCast;
+use crate::api::update_item_db;
 
 #[cfg(feature = "ssr")]
 use crate::db::{Database, DbItem};
@@ -17,6 +18,15 @@ struct WikidataSuggestion {
     id: String,
     label: String,
     description: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ClientDbItem {
+    id: String,
+    name: String,
+    description: String,
+    wikidata_id: Option<String>,
+    custom_properties: String,
 }
 
 #[component]
@@ -247,7 +257,7 @@ pub fn ItemsList(
                                 let set_property_labels = set_property_labels.clone();
                                 spawn_local(async move {
                                     let properties = fetch_item_properties(&wikidata_id, set_fetched_properties, set_property_labels).await;
-                                    // log!("Fetched properties for index {}: {:?}", index, properties);
+                                    log!("Fetched properties for index {}: {:?}", index, properties);
                                 });
                             }
                         }
@@ -260,28 +270,28 @@ pub fn ItemsList(
                         item.custom_properties.insert(field.to_string(), value.clone());
                     }
                 }
+
+                // Send the updated item to the server using the API endpoint
+                let client_db_item = ClientDbItem {
+                    id: item.id.clone(),
+                    name: item.name.clone(),
+                    description: item.description.clone(),
+                    wikidata_id: item.wikidata_id.clone(),
+                    custom_properties: serde_json::to_string(&item.custom_properties).unwrap(),
+                };
+
+                
+                spawn_local(async move {
+                    match update_item_db(client_db_item).await {
+                        Ok(_) => {
+                            log!("Item updated successfully on the server");
+                        }
+                        Err(e) => {
+                            log!("Error updating item on the server: {}", e);
+                        }
+                    }
+                });
             }
-            #[cfg(feature = "ssr")]
-        {
-            log!("SSR block in update_item is executing");
-            // Update items in the database
-            let db_item = DbItem {
-                id: items[index].id.clone(),
-                name: items[index].name.clone(),
-                description: items[index].description.clone(),
-                wikidata_id: items[index].wikidata_id.clone(),
-                custom_properties: serde_json::to_string(&items[index].custom_properties).unwrap(),
-            };
-            let db = Database::new("items.db").expect("Failed to open database");
-            match db.insert_item(&db_item) {
-                Ok(_) => {
-                    log!("Item inserted successfully");
-                }
-                Err(e) => {
-                    log!("Error inserting item: {}", e);
-                }
-            }
-        }
             // Automatically add a new row when editing the last row
             if index == items.len() - 1 && !value.is_empty() {
                 items.push(Item {

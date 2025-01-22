@@ -2,6 +2,7 @@ pub mod app;
 pub mod components;
 pub mod models;
 pub mod nostr;
+pub mod api;
 #[cfg(feature = "ssr")]
 pub mod db;
 
