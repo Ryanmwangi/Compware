@@ -1,32 +1,19 @@
 use crate::components::editable_cell::EditableCell;
 use crate::components::editable_cell::InputType;
 use leptos::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use uuid::Uuid;
 use leptos::logging::log;
 use crate::models::item::Item;
 use std::collections::HashMap;
 use std::sync::Arc;
 use wasm_bindgen::JsCast;
-use crate::api::update_item_db;
-
-#[cfg(feature = "ssr")]
-use crate::db::{Database, DbItem};
 
 #[derive(Deserialize, Clone, Debug)]
 struct WikidataSuggestion {
     id: String,
     label: String,
     description: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct ClientDbItem {
-    id: String,
-    name: String,
-    description: String,
-    wikidata_id: Option<String>,
-    custom_properties: String,
 }
 
 #[component]
@@ -49,23 +36,6 @@ pub fn ItemsList(
     //signal to store the fetched property labels
     let (property_labels, set_property_labels) = create_signal(HashMap::<String, String>::new());
 
-    #[cfg(feature = "ssr")]
-    {
-    log!("SSR feature is enabled, attempting to update database...");
-    log!("Is SSR enabled? {}", cfg!(feature = "ssr"));
-    let db_path = "items.db"; // path to the database file
-    let db = Database::new(db_path).unwrap();
-    db.create_schema().unwrap();
-
-    let db_items = db.get_items().unwrap();
-    let loaded_items: Vec<Item> = db_items.into_iter().map(|db_item| {
-        serde_json::from_str(&db_item.custom_properties).unwrap()
-    }).collect();
-
-    spawn_local(async move {
-        set_items.set(loaded_items);
-    });
-    }
     // Ensure there's an initial empty row
     if items.get().is_empty() {
         set_items.set(vec![Item {
@@ -271,26 +241,26 @@ pub fn ItemsList(
                     }
                 }
 
-                // Send the updated item to the server using the API endpoint
-                let client_db_item = ClientDbItem {
-                    id: item.id.clone(),
-                    name: item.name.clone(),
-                    description: item.description.clone(),
-                    wikidata_id: item.wikidata_id.clone(),
-                    custom_properties: serde_json::to_string(&item.custom_properties).unwrap(),
-                };
+                // // Send the updated item to the server using the API endpoint
+                // let client_db_item = ClientDbItem {
+                //     id: item.id.clone(),
+                //     name: item.name.clone(),
+                //     description: item.description.clone(),
+                //     wikidata_id: item.wikidata_id.clone(),
+                //     custom_properties: serde_json::to_string(&item.custom_properties).unwrap(),
+                // };
 
                 
-                spawn_local(async move {
-                    match update_item_db(client_db_item).await {
-                        Ok(_) => {
-                            log!("Item updated successfully on the server");
-                        }
-                        Err(e) => {
-                            log!("Error updating item on the server: {}", e);
-                        }
-                    }
-                });
+                // spawn_local(async move {
+                //     match update_item_db(client_db_item).await {
+                //         Ok(_) => {
+                //             log!("Item updated successfully on the server");
+                //         }
+                //         Err(e) => {
+                //             log!("Error updating item on the server: {}", e);
+                //         }
+                //     }
+                // });
             }
             // Automatically add a new row when editing the last row
             if index == items.len() - 1 && !value.is_empty() {

@@ -1,46 +1,35 @@
 #[cfg(feature = "ssr")]
-use leptos::*;
-#[cfg(feature = "ssr")]
-use leptos::logging::log;
+use actix_web::{web, HttpResponse};
 #[cfg(feature = "ssr")]
 use crate::db::{Database, DbItem};
+#[cfg(feature = "ssr")]
+use std::sync::Arc;
+#[cfg(feature = "ssr")]
+use tokio::sync::Mutex;
 
 #[cfg(feature = "ssr")]
-#[server(UpdateItem, "/api")]
-pub async fn update_item_db(client_db_item: ClientDbItem) -> Result<(), ServerFnError> {
-
-    let db_item = DbItem {
-        id: client_db_item.id,
-        name: client_db_item.name,
-        description: client_db_item.description,
-        wikidata_id: client_db_item.wikidata_id,
-        custom_properties: client_db_item.custom_properties,
-    };
-
-    // Log the start of the function
-    log!("Starting update_item function for item: {:?}", db_item);
-
-    // Open the database
-    let db = match Database::new("items.db") {
-        Ok(db) => {
-            log!("Database opened successfully");
-            db
+pub async fn get_items(db: web::Data<Arc<Mutex<Database>>>) -> HttpResponse {
+    let db = db.lock().await;
+    match db.get_items().await {
+        Ok(items) => HttpResponse::Ok().json(items),
+        Err(err) => {
+            leptos::logging::error!("Failed to fetch items: {:?}", err);
+            HttpResponse::InternalServerError().body("Failed to fetch items")
         }
-        Err(e) => {
-            log!("Failed to open database: {}", e);
-            return Err(ServerFnError::ServerError(e.to_string()));
-        }
-    };
+    }
+}
 
-    // Insert the item into the database
-    match db.insert_item(&db_item) {
-        Ok(_) => {
-            log!("Item inserted successfully: {:?}", db_item);
-            Ok(())
-        }
-        Err(e) => {
-            log!("Failed to insert item into database: {}", e);
-            Err(ServerFnError::ServerError(e.to_string()))
+#[cfg(feature = "ssr")]
+pub async fn create_item(
+    db: web::Data<Arc<Mutex<Database>>>,
+    item: web::Json<DbItem>,
+) -> HttpResponse {
+    let db = db.lock().await;
+    match db.insert_item(&item.into_inner()).await {
+        Ok(_) => HttpResponse::Ok().body("Item inserted"),
+        Err(err) => {
+            leptos::logging::error!("Failed to insert item: {:?}", err);
+            HttpResponse::InternalServerError().body("Failed to insert item")
         }
     }
 }

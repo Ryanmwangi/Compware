@@ -1,6 +1,3 @@
-use actix_web::{web, App, HttpServer};
-use compareware::api::update_item_db; // Corrected server function name
-use compareware::db::Database;
 #[cfg(feature = "ssr")]
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -9,10 +6,19 @@ async fn main() -> std::io::Result<()> {
     use leptos::*;
     use leptos_actix::{generate_route_list, LeptosRoutes};
     use compareware::app::*;
+    use compareware::db::{Database, DbItem};
+    use compareware::api::{get_items, create_item}; // Import API handlers
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
 
     // Load configuration
     let conf = get_configuration(None).await.unwrap();
     let addr = conf.leptos_options.site_addr;
+
+    // Initialize the database
+    let db = Database::new("compareware.db").unwrap();
+    db.create_schema().await.unwrap(); // Ensure the schema is created
+    let db = Arc::new(Mutex::new(db)); // Wrap the database in an Arc<Mutex<T>> for shared state
 
     // Generate the list of routes in your Leptos App
     let routes = generate_route_list(App);
@@ -22,6 +28,8 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         let leptos_options = &conf.leptos_options;
         let site_root = &leptos_options.site_root;
+        let db = db.clone(); // Clone the Arc for each worker
+
 
         App::new()
             // Register server functions
@@ -37,6 +45,11 @@ async fn main() -> std::io::Result<()> {
             // Pass Leptos options to the app
             .app_data(web::Data::new(leptos_options.to_owned()))
         //.wrap(middleware::Compress::default())
+            // Pass the database as shared state
+            .app_data(web::Data::new(db))
+            // Register API endpoints
+            .route("/api/items", web::get().to(get_items))
+            .route("/api/items", web::post().to(create_item))
     })
     .bind(&addr)?
     .run()
