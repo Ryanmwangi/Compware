@@ -16,7 +16,7 @@ mod db_impl {
         // Create a new database connection
         pub fn new(db_path: &str) -> Result<Self, Error> {
             let conn = Connection::open(db_path)?;
-            logging::log!("Database connection established at: {}", db_path); // Log with Leptos
+            logging::log!("Database connection established at: {}", db_path); 
             Ok(Database {
                 conn: Arc::new(Mutex::new(conn)),
             })
@@ -34,7 +34,7 @@ mod db_impl {
                     custom_properties TEXT
                 );",
             )?;
-            logging::log!("Database schema created or verified"); // Log with Leptos
+            logging::log!("Database schema created or verified");
             Ok(())
         }
 
@@ -43,16 +43,22 @@ mod db_impl {
             let conn = self.conn.lock().await;
             let wikidata_id = item.wikidata_id.as_ref().map(|s| s.as_str()).unwrap_or("");
             conn.execute(
-                "INSERT INTO items (id, name, description, wikidata_id, custom_properties) VALUES (?, ?, ?, ?, ?);",
-                &[
-                    &item.id,
-                    &item.name,
-                    &item.description,
-                    &wikidata_id.to_string(),
-                    &item.custom_properties,
-                ],
-            )?;
-            logging::log!("Item inserted: {}", item.id); // Log with Leptos
+            "INSERT INTO items (id, name, description, wikidata_id, custom_properties)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+                 name = excluded.name,
+                 description = excluded.description,
+                 wikidata_id = excluded.wikidata_id,
+                 custom_properties = excluded.custom_properties;",
+            &[
+                &item.id,
+                &item.name,
+                &item.description,
+                &wikidata_id.to_string(),
+                &item.custom_properties,
+            ],
+        )?;
+            logging::log!("Item inserted: {}", item.id);
             Ok(())
         }
 
