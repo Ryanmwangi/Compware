@@ -32,6 +32,12 @@ async fn main() -> std::io::Result<()> {
 
 
         App::new()
+            // Register custom API routes BEFORE Leptos server functions
+            .service(
+                web::scope("/api")
+                    .route("/items", web::get().to(get_items))
+                    .route("/items", web::post().to(create_item)),
+            )
             // Register server functions
             .route("/api/{tail:.*}", leptos_actix::handle_server_fns())
             // Serve JS/WASM/CSS from `pkg`
@@ -44,12 +50,9 @@ async fn main() -> std::io::Result<()> {
             .leptos_routes(leptos_options.to_owned(), routes.to_owned(), App)
             // Pass Leptos options to the app
             .app_data(web::Data::new(leptos_options.to_owned()))
-        //.wrap(middleware::Compress::default())
+            //.wrap(middleware::Compress::default())
             // Pass the database as shared state
             .app_data(web::Data::new(db))
-            // Register API endpoints
-            .route("/api/items", web::get().to(get_items))
-            .route("/api/items", web::post().to(create_item))
     })
     .bind(&addr)?
     .run()
