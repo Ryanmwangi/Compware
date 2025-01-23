@@ -1,7 +1,7 @@
 use crate::components::editable_cell::EditableCell;
 use crate::components::editable_cell::InputType;
 use leptos::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use leptos::logging::log;
 use crate::models::item::Item;
@@ -46,6 +46,47 @@ pub fn ItemsList(
             wikidata_id: None,
             custom_properties: HashMap::new(),
         }]);
+    }
+
+    // Function to send an item to the backend API
+    async fn save_item_to_db(item: Item) {
+        // Serialize `custom_properties` to a JSON string
+        let custom_properties = serde_json::to_string(&item.custom_properties).unwrap();
+    
+        // Create a new struct to send to the backend
+        #[derive(Serialize, Debug)]
+        struct ItemToSend {
+            id: String,
+            name: String,
+            description: String,
+            wikidata_id: Option<String>,
+            custom_properties: String, // JSON-encoded string
+        }
+    
+        let item_to_send = ItemToSend {
+            id: item.id,
+            name: item.name,
+            description: item.description,
+            wikidata_id: item.wikidata_id,
+            custom_properties, // Use the serialized string
+        };
+    
+        let response = gloo_net::http::Request::post("/api/items")
+            .json(&item_to_send)
+            .unwrap()
+            .send()
+            .await;
+    
+        match response {
+            Ok(resp) => {
+                if resp.status() == 200 {
+                    log!("Item saved to database: {:?}", item_to_send);
+                } else {
+                    log!("Failed to save item: {}", resp.status_text());
+                }
+            }
+            Err(err) => log!("Failed to save item: {:?}", err),
+        }
     }
 
     let (wikidata_suggestions, set_wikidata_suggestions) = create_signal(HashMap::<String, Vec<WikidataSuggestion>>::new());
@@ -169,6 +210,11 @@ pub fn ItemsList(
                 set_items.update(|items| {
                     for item in items {
                         item.custom_properties.entry(property.clone()).or_insert_with(|| "".to_string());
+                        // Save the updated item to the database
+                        let item_clone = item.clone();
+                        spawn_local(async move {
+                            save_item_to_db(item_clone).await;
+                        });
                     }
                 });
 
@@ -210,8 +256,6 @@ pub fn ItemsList(
     
     // Update item fields
     let update_item = move |index: usize, field: &str, value: String| {
-        log!("Updating item at index {}: {}, {}", index, field, value);
-        log!("Is SSR enabled? {}", cfg!(feature = "ssr"));
         set_items.update(|items| {
             if let Some(item) = items.get_mut(index) {
                 match field {
@@ -241,36 +285,26 @@ pub fn ItemsList(
                     }
                 }
 
-                // // Send the updated item to the server using the API endpoint
-                // let client_db_item = ClientDbItem {
-                //     id: item.id.clone(),
-                //     name: item.name.clone(),
-                //     description: item.description.clone(),
-                //     wikidata_id: item.wikidata_id.clone(),
-                //     custom_properties: serde_json::to_string(&item.custom_properties).unwrap(),
-                // };
-
-                
-                // spawn_local(async move {
-                //     match update_item_db(client_db_item).await {
-                //         Ok(_) => {
-                //             log!("Item updated successfully on the server");
-                //         }
-                //         Err(e) => {
-                //             log!("Error updating item on the server: {}", e);
-                //         }
-                //     }
-                // });
+                // Save the updated item to the database
+                let item_clone = item.clone();
+                spawn_local(async move {
+                    save_item_to_db(item_clone).await;
+                });
             }
             // Automatically add a new row when editing the last row
             if index == items.len() - 1 && !value.is_empty() {
-                items.push(Item {
+                let new_item = Item {
                     id: Uuid::new_v4().to_string(),
                     name: String::new(),
                     description: String::new(),
-                    // reviews: vec![],
                     wikidata_id: None,
                     custom_properties: HashMap::new(),
+                };
+                items.push(new_item.clone());
+
+                // Save the new item to the database
+                spawn_local(async move {
+                    save_item_to_db(new_item).await;
                 });
             }
             log!("Items updated: {:?}", items);
