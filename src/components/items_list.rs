@@ -33,8 +33,10 @@ pub fn ItemsList(
     // cache to store fetched properties
     let (fetched_properties, set_fetched_properties) = create_signal(HashMap::<String, String>::new());
    
-    //signal to store the fetched property labels
+    // Signal to store the fetched property labels
     let (property_labels, set_property_labels) = create_signal(HashMap::<String, String>::new());
+    // State to track selected properties
+    let (selected_properties, set_selected_properties) = create_signal(HashMap::<String, bool>::new());
 
     // Ensure there's an initial empty row
     if items.get().is_empty() {
@@ -47,11 +49,20 @@ pub fn ItemsList(
             custom_properties: HashMap::new(),
         }]);
     }
-
+    
     // Function to send an item to the backend API
-    async fn save_item_to_db(item: Item) {
+    async fn save_item_to_db(item: Item, selected_properties: ReadSignal<HashMap<String, bool>>) {
+        // Use a reactive closure to access `selected_properties`
+        let custom_properties: HashMap<String, String> = (move || {
+            let selected_props = selected_properties.get(); // Access the signal inside a reactive closure
+            item.custom_properties
+                .into_iter()
+                .filter(|(key, _)| selected_props.contains_key(key)) // Use the extracted value
+                .collect()
+        })(); 
+
         // Serialize `custom_properties` to a JSON string
-        let custom_properties = serde_json::to_string(&item.custom_properties).unwrap();
+        let custom_properties = serde_json::to_string(&custom_properties).unwrap();
     
         // Create a new struct to send to the backend
         #[derive(Serialize, Debug)]
@@ -206,14 +217,21 @@ pub fn ItemsList(
         set_custom_properties.update(|props| {
             if !props.contains(&property) && !property.is_empty() {
                 props.push(property.clone());
+
+                //update the selected_properties state when a new property is added
+                set_selected_properties.update(|selected| {
+                    selected.insert(property.clone(), true);
+                });
+
                 // Ensure the grid updates reactively
                 set_items.update(|items| {
                     for item in items {
                         item.custom_properties.entry(property.clone()).or_insert_with(|| "".to_string());
+                        
                         // Save the updated item to the database
                         let item_clone = item.clone();
                         spawn_local(async move {
-                            save_item_to_db(item_clone).await;
+                            save_item_to_db(item_clone, selected_properties).await;
                         });
                     }
                 });
@@ -288,7 +306,7 @@ pub fn ItemsList(
                 // Save the updated item to the database
                 let item_clone = item.clone();
                 spawn_local(async move {
-                    save_item_to_db(item_clone).await;
+                    save_item_to_db(item_clone, selected_properties).await;
                 });
             }
             // Automatically add a new row when editing the last row
@@ -304,7 +322,7 @@ pub fn ItemsList(
 
                 // Save the new item to the database
                 spawn_local(async move {
-                    save_item_to_db(new_item).await;
+                    save_item_to_db(new_item, selected_properties).await;
                 });
             }
             log!("Items updated: {:?}", items);
