@@ -16,11 +16,34 @@ struct WikidataSuggestion {
     description: Option<String>,
 }
 
+
+#[derive(Deserialize, Debug)]
+struct DbItem {
+    id: String,
+    name: String,
+    description: String,
+    wikidata_id: Option<String>,
+    custom_properties: String,
+}
+
 #[component]
 pub fn ItemsList(
     items: ReadSignal<Vec<Item>>,
     set_items: WriteSignal<Vec<Item>>,
 ) -> impl IntoView {
+    
+    // Load items from the database on startup
+    spawn_local(async move {
+        match load_items_from_db().await {
+            Ok(loaded_items) => {
+                set_items.set(loaded_items);
+            }
+            Err(err) => {
+                log!("Error loading items: {}", err);
+            }
+        }
+    });
+
     // State to track the currently focused cell
     let (focused_cell, set_focused_cell) = create_signal(None::<String>);
 
@@ -97,6 +120,45 @@ pub fn ItemsList(
                 }
             }
             Err(err) => log!("Failed to save item: {:?}", err),
+        }
+    }
+
+    //function to load items from database
+    async fn load_items_from_db() -> Result<Vec<Item>, String> {
+        let response = gloo_net::http::Request::get("/api/items")
+            .send()
+            .await
+            .map_err(|err| format!("Failed to fetch items: {:?}", err))?;
+    
+        if response.status() == 200 {
+            // Deserialize into Vec<DbItem>
+            let db_items = response
+                .json::<Vec<DbItem>>()
+                .await
+                .map_err(|err| format!("Failed to parse items: {:?}", err))?;
+    
+            // Convert DbItem to Item
+            let items = db_items
+                .into_iter()
+                .map(|db_item| {
+                    // Deserialize `custom_properties` from a JSON string to a HashMap
+                    let custom_properties: HashMap<String, String> =
+                        serde_json::from_str(&db_item.custom_properties)
+                            .unwrap_or_default(); // Fallback to an empty HashMap if deserialization fails
+    
+                    Item {
+                        id: db_item.id,
+                        name: db_item.name,
+                        description: db_item.description,
+                        wikidata_id: db_item.wikidata_id,
+                        custom_properties, // Deserialized HashMap
+                    }
+                })
+                .collect();
+    
+            Ok(items)
+        } else {
+            Err(format!("Failed to fetch items: {}", response.status_text()))
         }
     }
 
