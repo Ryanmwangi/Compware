@@ -31,19 +31,9 @@ pub fn ItemsList(
     items: ReadSignal<Vec<Item>>,
     set_items: WriteSignal<Vec<Item>>,
 ) -> impl IntoView {
+    // State to track selected properties
+    let (selected_properties, set_selected_properties) = create_signal(HashMap::<String, bool>::new());
     
-    // Load items from the database on startup
-    spawn_local(async move {
-        match load_items_from_db().await {
-            Ok(loaded_items) => {
-                set_items.set(loaded_items);
-            }
-            Err(err) => {
-                log!("Error loading items: {}", err);
-            }
-        }
-    });
-
     // State to track the currently focused cell
     let (focused_cell, set_focused_cell) = create_signal(None::<String>);
 
@@ -58,8 +48,44 @@ pub fn ItemsList(
    
     // Signal to store the fetched property labels
     let (property_labels, set_property_labels) = create_signal(HashMap::<String, String>::new());
-    // State to track selected properties
-    let (selected_properties, set_selected_properties) = create_signal(HashMap::<String, bool>::new());
+    
+    spawn_local(async move {
+        match load_items_from_db().await {
+            Ok(loaded_items) => {
+                // Set the loaded items
+                set_items.set(loaded_items.clone());
+    
+                // Derive selected properties from the loaded items
+                let mut selected_props = HashMap::new();
+                let loaded_items_clone = loaded_items.clone();
+                for item in loaded_items {
+                    for (property, _) in item.custom_properties {
+                        selected_props.insert(property, true);
+                    }
+                }
+                set_selected_properties.set(selected_props);
+
+                // Update the custom_properties signal
+                let mut custom_props = Vec::new();
+                for item in loaded_items_clone {
+                    for (property, _) in &item.custom_properties {
+                        if !custom_props.iter().any(|p| p == property) {
+                            custom_props.push(property.clone());
+                        }
+                    }
+                }
+                log!("Custom properties: {:?}", custom_props);
+                log!("Updating custom properties signal: {:?}", custom_props);
+                set_custom_properties.set(custom_props);
+
+                log!("Items after loading: {:?}", items.get());
+            }
+            Err(err) => {
+                log!("Error loading items: {}", err);
+            }
+        }
+    });
+
 
     // Ensure there's an initial empty row
     if items.get().is_empty() {
@@ -132,10 +158,13 @@ pub fn ItemsList(
     
         if response.status() == 200 {
             // Deserialize into Vec<DbItem>
+            log!("Loading items from DB...");
             let db_items = response
                 .json::<Vec<DbItem>>()
                 .await
                 .map_err(|err| format!("Failed to parse items: {:?}", err))?;
+
+            log!("Deserialized DB items: {:?}", db_items);
     
             // Convert DbItem to Item
             let items = db_items
@@ -145,7 +174,10 @@ pub fn ItemsList(
                     let custom_properties: HashMap<String, String> =
                         serde_json::from_str(&db_item.custom_properties)
                             .unwrap_or_default(); // Fallback to an empty HashMap if deserialization fails
-    
+                    
+                    log!("Loaded item: {:?}", db_item.id);
+                    log!("Custom properties: {:?}", custom_properties);
+                    
                     Item {
                         id: db_item.id,
                         name: db_item.name,
@@ -155,7 +187,7 @@ pub fn ItemsList(
                     }
                 })
                 .collect();
-    
+            log!("Converted items: {:?}", items);
             Ok(items)
         } else {
             Err(format!("Failed to fetch items: {}", response.status_text()))
@@ -563,6 +595,7 @@ pub fn ItemsList(
                     // Dynamically adding custom properties as columns
                     {move || {
                         let custom_props = custom_properties.get().clone();
+                        log!("Rendering custom properties: {:?}", custom_props);
                         custom_props.into_iter().map(move |property| {
                             let property_clone = property.clone();
                             let property_label = property_labels.get().get(&property_clone).cloned().unwrap_or_else(|| property_clone.clone());
