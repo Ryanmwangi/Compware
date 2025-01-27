@@ -608,33 +608,48 @@ pub fn ItemsList(
                         custom_props.into_iter().map(move |property| {
                             let property_clone = property.clone();
                             let property_label = property_labels.get().get(&property_clone).cloned().unwrap_or_else(|| property_clone.clone());
+                            let property_clone_for_button = property_clone.clone();
+                            let property_clone_for_cells = property_clone.clone(); 
                             view! {
                                 <tr>
-                                    <td>{ property_label }</td>
-                                    {move || {
-                                        let property_clone = property_clone.clone(); // Clone `property_clone` again for the inner closure
-                                        items.get().iter().enumerate().map(move |(index, item)| {
-                                            let property_clone_for_closure = property_clone.clone();
-                                            view! {
-                                                <td>
-                                                    <EditableCell
-                                                        value=item.custom_properties.get(&property_clone).cloned().unwrap_or_default()
-                                                        on_input=move |value| update_item(index, &property_clone_for_closure, value)
-                                                        key=Arc::new(format!("custom-{}-{}", property_clone, index))
-                                                        focused_cell=focused_cell
-                                                        set_focused_cell=set_focused_cell.clone()
-                                                        on_focus=Some(Callback::new(move |_| {
-                                                            log!("Custom property input focused");
-                                                        }))
-                                                        on_blur=Some(Callback::new(move |_| {
-                                                            log!("Custom property input blurred");
-                                                        }))
-                                                        input_type=InputType::TextArea
-                                                    />
-                                                </td>
-                                            }
-                                        }).collect::<Vec<_>>()
-                                    }}
+                                    <td>
+                                        { property_label }
+                                        <button class="delete-property" on:click=move |_| {
+                                            log!("Deleting property: {}", property_clone_for_button);
+                                            set_custom_properties.update(|props| {
+                                                props.retain(|p| p != &property_clone_for_button);
+                                            });
+                                            set_selected_properties.update(|selected| {
+                                                selected.remove(&property_clone_for_button);
+                                            });
+                                            set_items.update(|items| {
+                                                for item in items {
+                                                    item.custom_properties.remove(&property_clone_for_button);
+                                                }
+                                            });
+                                        }>{ "Delete" }</button>
+                                    </td>
+                                    {items.get().iter().enumerate().map(move |(index, item)| {
+                                        let property_clone_for_closure = property_clone_for_cells.clone();
+                                        view! {
+                                            <td>
+                                                <EditableCell
+                                                    value=item.custom_properties.get(&property_clone_for_closure).cloned().unwrap_or_default()
+                                                    on_input=move |value| update_item(index, &property_clone_for_closure, value)
+                                                    key=Arc::new(format!("custom-{}-{}", property_clone_for_cells, index))
+                                                    focused_cell=focused_cell
+                                                    set_focused_cell=set_focused_cell.clone()
+                                                    on_focus=Some(Callback::new(move |_| {
+                                                        log!("Custom property input focused");
+                                                    }))
+                                                    on_blur=Some(Callback::new(move |_| {
+                                                        log!("Custom property input blurred");
+                                                    }))
+                                                    input_type=InputType::TextArea
+                                                />
+                                            </td>
+                                        }
+                                    }).collect::<Vec<_>>()}
                                 </tr>
                             }
                         }).collect::<Vec<_>>()
