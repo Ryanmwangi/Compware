@@ -74,9 +74,18 @@ pub fn ItemsList(
                         }
                     }
                 }
-                log!("Custom properties: {:?}", custom_props);
-                log!("Updating custom properties signal: {:?}", custom_props);
+
+                let custom_props_clone = custom_props.clone();
                 set_custom_properties.set(custom_props);
+
+                // Fetch labels for the custom properties
+                let property_ids = custom_props_clone;
+                let labels = fetch_property_labels(property_ids).await;
+                set_property_labels.update(|labels_map| {
+                    for (key, value) in labels {
+                        labels_map.insert(key, value);
+                    }
+                });
 
                 log!("Items after loading: {:?}", items.get());
             }
