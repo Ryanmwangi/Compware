@@ -33,3 +33,33 @@ pub async fn create_item(
         }
     }
 }
+
+#[cfg(feature = "ssr")]
+pub async fn delete_item(
+    db: web::Data<Arc<Mutex<Database>>>,
+    item_id: web::Path<String>,
+) -> HttpResponse {
+    let db = db.lock().await;
+    match db.delete_item(&item_id).await {
+        Ok(_) => HttpResponse::Ok().body("Item deleted"),
+        Err(err) => {
+            leptos::logging::error!("Failed to delete item: {:?}", err);
+            HttpResponse::InternalServerError().body("Failed to delete item")
+        }
+    }
+}
+
+#[cfg(feature = "ssr")]
+pub async fn delete_property(
+    db: web::Data<Arc<Mutex<Database>>>,
+    property: web::Path<String>,
+) -> HttpResponse {
+    let db = db.lock().await;
+    match db.delete_property(&property).await {
+        Ok(_) => HttpResponse::Ok().body("Property deleted"),
+        Err(err) => {
+            leptos::logging::error!("Failed to delete property: {:?}", err);
+            HttpResponse::InternalServerError().body("Failed to delete property")
+        }
+    }
+}

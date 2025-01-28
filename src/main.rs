@@ -7,7 +7,7 @@ async fn main() -> std::io::Result<()> {
     use leptos_actix::{generate_route_list, LeptosRoutes};
     use compareware::app::*;
     use compareware::db::{Database, DbItem};
-    use compareware::api::{get_items, create_item}; // Import API handlers
+    use compareware::api::{get_items, create_item, delete_item, delete_property}; // Import API handlers
     use std::sync::Arc;
     use tokio::sync::Mutex;
 
@@ -35,8 +35,10 @@ async fn main() -> std::io::Result<()> {
             // Register custom API routes BEFORE Leptos server functions
             .service(
                 web::scope("/api")
-                    .route("/items", web::get().to(get_items))
-                    .route("/items", web::post().to(create_item)),
+                    .route("/items", web::get().to(get_items)) // GET /api/items
+                    .route("/items", web::post().to(create_item)) // POST /api/items
+                    .route("/items/{id}", web::delete().to(delete_item)) // DELETE /api/items/{id}
+                    .route("/properties/{property}", web::delete().to(delete_property)), // DELETE /api/properties/{property}
             )
             // Register server functions
             .route("/api/{tail:.*}", leptos_actix::handle_server_fns())

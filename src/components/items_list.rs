@@ -203,6 +203,58 @@ pub fn ItemsList(
         }
     }
 
+    // remove an item
+    let remove_item = move |index: usize| {
+        let item_id = items.get()[index].id.clone();
+        spawn_local(async move {
+            let response = gloo_net::http::Request::delete(&format!("/api/items/{}", item_id))
+                .send()
+                .await;
+            match response {
+                Ok(resp) => {
+                    if resp.status() == 200 {
+                        set_items.update(|items| {
+                            items.remove(index);
+                        });
+                        log!("Item deleted: {}", item_id);
+                    } else {
+                        log!("Failed to delete item: {}", resp.status_text());
+                    }
+                }
+                Err(err) => log!("Failed to delete item: {:?}", err),
+            }
+        });
+    };
+
+    let remove_property = move |property: String| {
+        spawn_local(async move {
+            let response = gloo_net::http::Request::delete(&format!("/api/properties/{}", property))
+                .send()
+                .await;
+            match response {
+                Ok(resp) => {
+                    if resp.status() == 200 {
+                        set_custom_properties.update(|props| {
+                            props.retain(|p| p != &property);
+                        });
+                        set_selected_properties.update(|selected| {
+                            selected.remove(&property);
+                        });
+                        set_items.update(|items| {
+                            for item in items {
+                                item.custom_properties.remove(&property);
+                            }
+                        });
+                        log!("Property deleted: {}", property);
+                    } else {
+                        log!("Failed to delete property: {}", resp.status_text());
+                    }
+                }
+                Err(err) => log!("Failed to delete property: {:?}", err),
+            }
+        });
+    };
+
     let (wikidata_suggestions, set_wikidata_suggestions) = create_signal(HashMap::<String, Vec<WikidataSuggestion>>::new());
 
     // Fetch Wikidata suggestions
@@ -432,14 +484,6 @@ pub fn ItemsList(
         });
     };
 
-
-    // Remove an item
-    let remove_item = move |index: usize| {
-        set_items.update(|items| {
-                items.remove(index);
-        });
-    };
-
     // List of properties to display as rows
     let properties = vec!["Name", "Description", "Actions"];
 
@@ -616,6 +660,7 @@ pub fn ItemsList(
                                         { property_label }
                                         <button class="delete-property" on:click=move |_| {
                                             log!("Deleting property: {}", property_clone_for_button);
+                                            remove_property(property_clone_for_button.clone());
                                             set_custom_properties.update(|props| {
                                                 props.retain(|p| p != &property_clone_for_button);
                                             });

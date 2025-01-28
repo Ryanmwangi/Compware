@@ -62,6 +62,21 @@ mod db_impl {
             Ok(())
         }
 
+        pub async fn delete_item(&self, item_id: &str) -> Result<(), Error> {
+            let conn = self.conn.lock().await;
+            conn.execute("DELETE FROM items WHERE id = ?", &[item_id])?;
+            logging::log!("Item deleted: {}", item_id);
+            Ok(())
+        }
+
+        pub async fn delete_property(&self, property: &str) -> Result<(), Error> {
+            let conn = self.conn.lock().await;
+            let query = format!("UPDATE items SET custom_properties = json_remove(custom_properties, '$.{}')", property);
+            conn.execute(&query, []).map_err(|e| Error::from(e))?;
+            logging::log!("Property deleted: {}", property);
+            Ok(())
+        }
+        
         // Retrieve all items from the database
         pub async fn get_items(&self) -> Result<Vec<DbItem>, Error> {
             let conn = self.conn.lock().await;
