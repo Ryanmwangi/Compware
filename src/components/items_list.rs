@@ -53,7 +53,18 @@ pub fn ItemsList(
         match load_items_from_db().await {
             Ok(loaded_items) => {
                 // Set the loaded items
-                set_items.set(loaded_items.clone());
+                if loaded_items.is_empty() {
+                    // Initialize with one empty item if the database is empty
+                    set_items.set(vec![Item {
+                        id: Uuid::new_v4().to_string(),
+                        name: String::new(),
+                        description: String::new(),
+                        wikidata_id: None,
+                        custom_properties: HashMap::new(),
+                    }]);
+                } else {
+                    set_items.set(loaded_items.clone());
+                }
     
                 // Derive selected properties from the loaded items
                 let mut selected_props = HashMap::new();
