@@ -685,7 +685,9 @@ pub fn ItemsList(
                                             });
                                         }>{ "Delete" }</button>
                                     </td>
-                                    {items.get().iter().enumerate().map(move |(index, item)| {
+                                    {move || {
+                                        let property_clone_for_cells = property_clone.clone();
+                                        items.get().iter().enumerate().map(move |(index, item)| {
                                         let property_clone_for_closure = property_clone_for_cells.clone();
                                         view! {
                                             <td>
@@ -706,6 +708,7 @@ pub fn ItemsList(
                                             </td>
                                         }
                                     }).collect::<Vec<_>>()}
+                                    }
                                 </tr>
                             }
                         }).collect::<Vec<_>>()
