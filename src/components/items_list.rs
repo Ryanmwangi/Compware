@@ -497,7 +497,7 @@ pub fn ItemsList(
     };
 
     // List of properties to display as rows
-    let properties = vec!["Name", "Description", "Actions"];
+    let properties = vec!["Name", "Description"];
 
     view! {
         <div>
@@ -508,7 +508,10 @@ pub fn ItemsList(
                         <th>{ "Property" }</th>
                         {move || items.get().iter().enumerate().map(|(index, item)| {
                             view! {
-                                <th>{ item.name.clone() }</th>
+                                <th>
+                                    { item.name.clone() }
+                                    <button on:click=move |_| remove_item(index)>{ "Delete" }</button>
+                                </th>
                             }
                         }).collect::<Vec<_>>()} 
                     </tr>
@@ -644,9 +647,6 @@ pub fn ItemsList(
                                                     input_type=InputType::TextArea
                                                 />
                                                 }.into_view(),
-                                                "Actions" => view! {
-                                                    <button on:click=move |_| remove_item(index)>{ "Delete" }</button>
-                                                }.into_view(),
                                                 _ => view! {
                                                     { "" }
                                                 }.into_view(),
@@ -665,7 +665,6 @@ pub fn ItemsList(
                             let property_clone = property.clone();
                             let property_label = property_labels.get().get(&property_clone).cloned().unwrap_or_else(|| property_clone.clone());
                             let property_clone_for_button = property_clone.clone();
-                            let property_clone_for_cells = property_clone.clone(); 
                             view! {
                                 <tr>
                                     <td>
