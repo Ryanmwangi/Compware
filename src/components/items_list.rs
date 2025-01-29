@@ -716,7 +716,22 @@ pub fn ItemsList(
                 </tbody>
             </table>
             <div style="margin-bottom: 20px;">
-            <input type="text" id="new-property" placeholder="Add New Property" list="properties"/>
+                <input type="text" id="new-property" placeholder="Add New Property" list="properties" on:keydown=move |event| {
+                    if event.key() == "Enter"{
+                        let input_element = event.target().unwrap().dyn_into::<web_sys::HtmlInputElement>().unwrap();
+                        let property = input_element.value();
+                        if !property.is_empty() {
+                            // Extract the coded name from the selected value
+                            let coded_name = property.split(" - ").next().unwrap_or(&property).to_string();
+
+                            // Add the property using the coded name
+                            add_property(coded_name);
+
+                            // Clear the input field
+                            input_element.set_value("");
+                        }
+                    }
+                } />
                 <datalist id="properties">
                     {move || {
                         let properties = fetched_properties.get().clone();
@@ -730,22 +745,6 @@ pub fn ItemsList(
                         }).collect::<Vec<_>>()
                     }}
                 </datalist>
-                <button on:click=move |_| {
-                    let property = web_sys::window()
-                        .unwrap()
-                        .document()
-                        .unwrap()
-                        .get_element_by_id("new-property")
-                        .unwrap()
-                        .dyn_into::<web_sys::HtmlInputElement>()
-                        .unwrap()
-                        .value();
-                    // Extract the coded name from the selected value
-                    let coded_name = property.split(" - ").next().unwrap_or(&property).to_string();
-                                    
-                    // Add the property using the coded name
-                    add_property(coded_name);
-                }>{ "Add Property" }</button>
             </div>
         </div>
     }
