@@ -6,27 +6,55 @@ async fn main() -> std::io::Result<()> {
     use leptos::*;
     use leptos_actix::{generate_route_list, LeptosRoutes};
     use compareware::app::*;
+    use compareware::db::{Database, DbItem};
+    use compareware::api::{get_items, create_item, delete_item, delete_property}; // Import API handlers
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
 
+    // Load configuration
     let conf = get_configuration(None).await.unwrap();
     let addr = conf.leptos_options.site_addr;
+
+    // Initialize the database
+    let db = Database::new("compareware.db").unwrap();
+    db.create_schema().await.unwrap(); // Ensure the schema is created
+    let db = Arc::new(Mutex::new(db)); // Wrap the database in an Arc<Mutex<T>> for shared state
+
     // Generate the list of routes in your Leptos App
     let routes = generate_route_list(App);
     println!("listening on http://{}", &addr);
 
+    // Start the Actix Web server
     HttpServer::new(move || {
         let leptos_options = &conf.leptos_options;
         let site_root = &leptos_options.site_root;
+        let db = db.clone(); // Clone the Arc for each worker
+
 
         App::new()
-            // serve JS/WASM/CSS from `pkg`
+            // Register custom API routes BEFORE Leptos server functions
+            .service(
+                web::scope("/api")
+                    .route("/items", web::get().to(get_items)) // GET /api/items
+                    .route("/items", web::post().to(create_item)) // POST /api/items
+                    .route("/items/{id}", web::delete().to(delete_item)) // DELETE /api/items/{id}
+                    .route("/properties/{property}", web::delete().to(delete_property)), // DELETE /api/properties/{property}
+            )
+            // Register server functions
+            .route("/api/{tail:.*}", leptos_actix::handle_server_fns())
+            // Serve JS/WASM/CSS from `pkg`
             .service(Files::new("/pkg", format!("{site_root}/pkg")))
-            // serve other assets from the `assets` directory
+            // Serve other assets from the `assets` directory
             .service(Files::new("/assets", site_root))
-            // serve the favicon from /favicon.ico
+            // Serve the favicon from /favicon.ico
             .service(favicon)
+            // Register Leptos routes
             .leptos_routes(leptos_options.to_owned(), routes.to_owned(), App)
+            // Pass Leptos options to the app
             .app_data(web::Data::new(leptos_options.to_owned()))
-        //.wrap(middleware::Compress::default())
+            //.wrap(middleware::Compress::default())
+            // Pass the database as shared state
+            .app_data(web::Data::new(db))
     })
     .bind(&addr)?
     .run()
