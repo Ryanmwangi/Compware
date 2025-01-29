@@ -506,9 +506,9 @@ pub fn ItemsList(
                 <thead>
                     <tr>
                         <th>{ "Property" }</th>
-                        {move || items.get().iter().enumerate().map(|(index, _)| {
+                        {move || items.get().iter().enumerate().map(|(index, item)| {
                             view! {
-                                <th>{ format!("Item {}", index + 1) }</th>
+                                <th>{ item.name.clone() }</th>
                             }
                         }).collect::<Vec<_>>()} 
                     </tr>
