@@ -8,6 +8,7 @@ use crate::models::item::Item;
 use std::collections::HashMap;
 use std::sync::Arc;
 use wasm_bindgen::JsCast;
+use chrono::{DateTime, Utc};
 
 #[derive(Deserialize, Clone, Debug)]
 struct WikidataSuggestion {
@@ -299,10 +300,68 @@ pub fn ItemsList(
         });
     };
 
+    // function to handle different nested JSON types for property values
+    async fn parse_property_value(value: &serde_json::Value) -> String {
+        match value {
+            serde_json::Value::String(text) => text.clone(),
+            serde_json::Value::Number(num) => num.to_string(),
+            serde_json::Value::Object(map) => {
+
+                // Handle time values
+                if let Some(time_value) = map.get("time") {
+                    let precision = map.get("precision").and_then(|p| p.as_u64()).unwrap_or(11);
+
+                    if let Some(time_str) = time_value.as_str() {
+                        if let Ok(parsed_date) = chrono::DateTime::parse_from_rfc3339(time_str.trim_start_matches('+')) {
+                            return match precision {
+                                9 => parsed_date.format("%Y").to_string(),      // Year precision
+                                10 => parsed_date.format("%Y-%m").to_string(),  // Month precision
+                                11 => parsed_date.format("%Y-%m-%d").to_string(), // Day precision
+                                _ => parsed_date.format("%Y-%m-%d %H:%M:%S").to_string(),
+                            };
+                        }
+                    }
+                    return "Invalid time format".to_string();
+                }
+
+                // Handle Wikidata entity references
+                if let Some(id) = map.get("id") {
+                    // Handle Wikidata entity references
+                    let entity_id = id.as_str().unwrap_or("");
+                    if entity_id.starts_with("Q") {
+                        return fetch_entity_label(entity_id).await;
+                    }
+                }
+                serde_json::to_string(map).unwrap_or("Complex Object".to_string())
+            }
+            _ => "Unsupported data type".to_string(),
+        }
+    }
+
+    async fn fetch_entity_label(entity_id: &str) -> String {
+        let url = format!(
+            "https://www.wikidata.org/w/api.php?action=wbgetentities&ids={}&props=labels&languages=en&format=json&origin=*",
+            entity_id
+        );
+    
+        match gloo_net::http::Request::get(&url).send().await {
+            Ok(response) => {
+                if let Ok(data) = response.json::<serde_json::Value>().await {
+                    if let Some(entity) = data["entities"][entity_id]["labels"]["en"]["value"].as_str() {
+                        return entity.to_string();
+                    }
+                }
+            }
+            Err(err) => log!("Error fetching entity label: {:?}", err),
+        }
+    
+        entity_id.to_string() // Fallback to entity ID if label fetch fails
+    }    
+
     //function to fetch properties
     async fn fetch_item_properties(wikidata_id: &str, set_fetched_properties: WriteSignal<HashMap<String, String>>, set_property_labels: WriteSignal<HashMap<String, String>>,) -> HashMap<String, String> {
         let url = format!(
-            "https://www.wikidata.org/wiki/Special:EntityData/{}.json",
+            "https://www.wikidata.org/w/api.php?action=wbgetentities&ids={}&format=json&props=claims&origin=*",
             wikidata_id
         );
     
@@ -313,17 +372,16 @@ pub fn ItemsList(
                         if let Some(entity) = entities.get(wikidata_id) {
                             if let Some(claims) = entity["claims"].as_object() {
                                 let mut result = HashMap::new();
+                                
                                 for (property, values) in claims {
-                                    if let Some(value) = values[0]["mainsnak"]["datavalue"]["value"].as_str() {
-                                        result.insert(property.clone(), value.to_string());
-                                    } else if let Some(value) = values[0]["mainsnak"]["datavalue"]["value"].as_object() {
-                                        result.insert(property.clone(), serde_json::to_string(value).unwrap());
-                                    } else if let Some(value) = values[0]["mainsnak"]["datavalue"]["value"].as_f64() {
-                                        result.insert(property.clone(), value.to_string());
-                                    } else {
-                                        result.insert(property.clone(), "Unsupported data type".to_string());
+                                    for value_entry in values.as_array().unwrap_or(&vec![]) {
+                                        if let Some(datavalue) = value_entry["mainsnak"]["datavalue"].get("value") {
+                                            let parsed_value = parse_property_value(datavalue).await;
+                                            result.insert(property.clone(), parsed_value);
+                                        }
                                     }
                                 }
+
                                 // Fetch labels for the properties
                                 let property_ids = result.keys().cloned().collect::<Vec<_>>();
                                 let labels = fetch_property_labels(property_ids).await;
