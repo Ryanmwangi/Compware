@@ -8,6 +8,9 @@ use crate::models::item::Item;
 use std::collections::HashMap;
 use std::sync::Arc;
 use wasm_bindgen::JsCast;
+use urlencoding::encode;
+use gloo_net::http::Request;
+use serde_json::Value;
 
 #[derive(Deserialize, Clone, Debug)]
 struct WikidataSuggestion {
@@ -98,7 +101,7 @@ pub fn ItemsList(
                     }
                 });
 
-                log!("Items after loading: {:?}", items.get());
+                // log!("Items after loading: {:?}", items.get());
             }
             Err(err) => {
                 log!("Error loading items: {}", err);
@@ -160,7 +163,7 @@ pub fn ItemsList(
         match response {
             Ok(resp) => {
                 if resp.status() == 200 {
-                    log!("Item saved to database: {:?}", item_to_send);
+                    // log!("Item saved to database: {:?}", item_to_send);
                 } else {
                     log!("Failed to save item: {}", resp.status_text());
                 }
@@ -184,7 +187,7 @@ pub fn ItemsList(
                 .await
                 .map_err(|err| format!("Failed to parse items: {:?}", err))?;
 
-            log!("Deserialized DB items: {:?}", db_items);
+            // log!("Deserialized DB items: {:?}", db_items);
     
             // Convert DbItem to Item
             let items = db_items
@@ -207,7 +210,7 @@ pub fn ItemsList(
                     }
                 })
                 .collect();
-            log!("Converted items: {:?}", items);
+            // log!("Converted items: {:?}", items);
             Ok(items)
         } else {
             Err(format!("Failed to fetch items: {}", response.status_text()))
@@ -313,12 +316,12 @@ pub fn ItemsList(
             "#,
             wikidata_id
         );
-
+    
         let url = format!(
             "https://query.wikidata.org/sparql?query={}&format=json",
             urlencoding::encode(&sparql_query)
         );
-
+    
         match gloo_net::http::Request::get(&url)
             .header("Accept", "application/json")
             .send()
@@ -344,6 +347,14 @@ pub fn ItemsList(
     }
     
     async fn fetch_property_labels(property_ids: Vec<String>) -> HashMap<String, String> {
+        log!("Fetching property labels for properties: {:?}", property_ids);
+        
+        // Remove the "http://www.wikidata.org/prop/" prefix from property IDs
+        let property_ids: Vec<String> = property_ids
+            .into_iter()
+            .map(|id| id.replace("http://www.wikidata.org/prop/", ""))
+            .collect();
+        
         let property_ids_str = property_ids.join(" wd:");
         let sparql_query = format!(
             r#"
@@ -354,33 +365,68 @@ pub fn ItemsList(
             "#,
             property_ids_str
         );
-
+    
         let url = format!(
             "https://query.wikidata.org/sparql?query={}&format=json",
             urlencoding::encode(&sparql_query)
         );
-
+        log!("Sending request to URL: {}", url);
+    
         match gloo_net::http::Request::get(&url)
             .header("Accept", "application/json")
             .send()
             .await
         {
             Ok(response) => {
-                if let Ok(data) = response.json::<serde_json::Value>().await {
-                    let mut result = HashMap::new();
-                    if let Some(bindings) = data["results"]["bindings"].as_array() {
-                        for binding in bindings {
-                            let prop_id = binding["prop"]["value"].as_str().unwrap_or("").split('/').last().unwrap_or("").to_string();
-                            let prop_label = binding["propLabel"]["value"].as_str().unwrap_or("").to_string();
-                            result.insert(prop_id, prop_label);
+                log!("Received response from Wikidata. Status: {}", response.status());
+                if response.status() != 200 {
+                    log!("Error: Unexpected status code {}", response.status());
+                    return HashMap::new();
+                }
+    
+                match response.text().await {
+                    Ok(text) => {
+                        log!("Response body: {}", text);
+                        match serde_json::from_str::<serde_json::Value>(&text) {
+                            Ok(data) => {
+                                log!("Successfully parsed response from Wikidata");
+                                let mut result = HashMap::new();
+                                if let Some(bindings) = data["results"]["bindings"].as_array() {
+                                    log!("Found {} bindings in response", bindings.len());
+                                    for (i, binding) in bindings.iter().enumerate() {
+                                        if let (Some(prop), Some(label)) = (
+                                            binding["prop"]["value"].as_str(),
+                                            binding["propLabel"]["value"].as_str()
+                                        ) {
+                                            let prop_id = prop.split('/').last().unwrap_or("").to_string();
+                                            result.insert(prop_id.clone(), label.to_string());
+                                            log!("Processed binding {}: prop_id = {}, label = {}", i, prop_id, label);
+                                        } else {
+                                            log!("Warning: Binding {} is missing prop or propLabel", i);
+                                        }
+                                    }
+                                } else {
+                                    log!("Warning: No bindings found in the response");
+                                }
+                                log!("Fetched {} property labels", result.len());
+                                result
+                            }
+                            Err(e) => {
+                                log!("Error parsing response from Wikidata: {:?}", e);
+                                HashMap::new()
+                            }
                         }
                     }
-                    result
-                } else {
-                    HashMap::new()
+                    Err(e) => {
+                        log!("Error reading response body: {:?}", e);
+                        HashMap::new()
+                    }
                 }
             }
-            Err(_) => HashMap::new(),
+            Err(e) => {
+                log!("Error fetching property labels from Wikidata: {:?}", e);
+                HashMap::new()
+            }
         }
     }
     
@@ -674,7 +720,6 @@ pub fn ItemsList(
                     // Dynamically adding custom properties as columns
                     {move || {
                         let custom_props = custom_properties.get().clone();
-                        log!("Rendering custom properties: {:?}", custom_props);
                         custom_props.into_iter().map(move |property| {
                             let property_clone = property.clone();
                             let property_label = property_labels.get().get(&property_clone).cloned().unwrap_or_else(|| property_clone.clone());
@@ -712,10 +757,8 @@ pub fn ItemsList(
                                                     focused_cell=focused_cell
                                                     set_focused_cell=set_focused_cell.clone()
                                                     on_focus=Some(Callback::new(move |_| {
-                                                        log!("Custom property input focused");
                                                     }))
                                                     on_blur=Some(Callback::new(move |_| {
-                                                        log!("Custom property input blurred");
                                                     }))
                                                     input_type=InputType::TextArea
                                                 />
