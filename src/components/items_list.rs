@@ -8,9 +8,6 @@ use crate::models::item::Item;
 use std::collections::HashMap;
 use std::sync::Arc;
 use wasm_bindgen::JsCast;
-use chrono::{DateTime, Utc};
-use gloo_net::http::Request;
-use serde_json::Value;
 
 #[derive(Deserialize, Clone, Debug)]
 struct WikidataSuggestion {
@@ -18,6 +15,7 @@ struct WikidataSuggestion {
     label: String,
     description: Option<String>,
 }
+
 
 #[derive(Deserialize, Debug)]
 struct DbItem {
@@ -45,13 +43,12 @@ pub fn ItemsList(
     // State to manage suggestions visibility
     let (show_suggestions, set_show_suggestions) = create_signal(HashMap::<String, bool>::new());
     
-    // Cache to store fetched properties
-    let (fetched_properties, set_fetched_properties) = create_signal(HashMap::<String, String>::new());
+    // cache to store fetched properties
+    let (fetched_properties, set_fetched_properties) = create_signal(HashMap::<String, HashMap<String, String>>::new());
    
     // Signal to store the fetched property labels
     let (property_labels, set_property_labels) = create_signal(HashMap::<String, String>::new());
     
-    // Load items from the database on component mount
     spawn_local(async move {
         match load_items_from_db().await {
             Ok(loaded_items) => {
@@ -71,6 +68,7 @@ pub fn ItemsList(
     
                 // Derive selected properties from the loaded items
                 let mut selected_props = HashMap::new();
+                let loaded_items_clone = loaded_items.clone();
                 for item in loaded_items {
                     for (property, _) in item.custom_properties {
                         selected_props.insert(property, true);
@@ -80,17 +78,19 @@ pub fn ItemsList(
 
                 // Update the custom_properties signal
                 let mut custom_props = Vec::new();
-                for item in loaded_items {
+                for item in loaded_items_clone {
                     for (property, _) in &item.custom_properties {
-                        if !custom_props.contains(property) {
+                        if !custom_props.iter().any(|p| p == property) {
                             custom_props.push(property.clone());
                         }
                     }
                 }
+
+                let custom_props_clone = custom_props.clone();
                 set_custom_properties.set(custom_props);
 
                 // Fetch labels for the custom properties
-                let property_ids = custom_props.clone();
+                let property_ids = custom_props_clone;
                 let labels = fetch_property_labels(property_ids).await;
                 set_property_labels.update(|labels_map| {
                     for (key, value) in labels {
@@ -106,12 +106,14 @@ pub fn ItemsList(
         }
     });
 
+
     // Ensure there's an initial empty row
     if items.get().is_empty() {
         set_items.set(vec![Item {
             id: Uuid::new_v4().to_string(),
             name: String::new(),
             description: String::new(),
+            // reviews: vec![],
             wikidata_id: None,
             custom_properties: HashMap::new(),
         }]);
@@ -121,10 +123,10 @@ pub fn ItemsList(
     async fn save_item_to_db(item: Item, selected_properties: ReadSignal<HashMap<String, bool>>) {
         // Use a reactive closure to access `selected_properties`
         let custom_properties: HashMap<String, String> = (move || {
-            let selected_props = selected_properties.get();
+            let selected_props = selected_properties.get(); // Access the signal inside a reactive closure
             item.custom_properties
                 .into_iter()
-                .filter(|(key, _)| selected_props.contains_key(key))
+                .filter(|(key, _)| selected_props.contains_key(key)) // Use the extracted value
                 .collect()
         })(); 
 
@@ -138,7 +140,7 @@ pub fn ItemsList(
             name: String,
             description: String,
             wikidata_id: Option<String>,
-            custom_properties: String,
+            custom_properties: String, // JSON-encoded string
         }
     
         let item_to_send = ItemToSend {
@@ -146,7 +148,7 @@ pub fn ItemsList(
             name: item.name,
             description: item.description,
             wikidata_id: item.wikidata_id,
-            custom_properties,
+            custom_properties, // Use the serialized string
         };
     
         let response = gloo_net::http::Request::post("/api/items")
@@ -167,7 +169,7 @@ pub fn ItemsList(
         }
     }
 
-    // Function to load items from the database
+    //function to load items from database
     async fn load_items_from_db() -> Result<Vec<Item>, String> {
         let response = gloo_net::http::Request::get("/api/items")
             .send()
@@ -176,11 +178,14 @@ pub fn ItemsList(
     
         if response.status() == 200 {
             // Deserialize into Vec<DbItem>
+            log!("Loading items from DB...");
             let db_items = response
                 .json::<Vec<DbItem>>()
                 .await
                 .map_err(|err| format!("Failed to parse items: {:?}", err))?;
 
+            log!("Deserialized DB items: {:?}", db_items);
+    
             // Convert DbItem to Item
             let items = db_items
                 .into_iter()
@@ -188,17 +193,21 @@ pub fn ItemsList(
                     // Deserialize `custom_properties` from a JSON string to a HashMap
                     let custom_properties: HashMap<String, String> =
                         serde_json::from_str(&db_item.custom_properties)
-                            .unwrap_or_default();
+                            .unwrap_or_default(); // Fallback to an empty HashMap if deserialization fails
+                    
+                    log!("Loaded item: {:?}", db_item.id);
+                    log!("Custom properties: {:?}", custom_properties);
                     
                     Item {
                         id: db_item.id,
                         name: db_item.name,
                         description: db_item.description,
                         wikidata_id: db_item.wikidata_id,
-                        custom_properties,
+                        custom_properties, // Deserialized HashMap
                     }
                 })
                 .collect();
+            log!("Converted items: {:?}", items);
             Ok(items)
         } else {
             Err(format!("Failed to fetch items: {}", response.status_text()))
@@ -290,152 +299,98 @@ pub fn ItemsList(
         });
     };
 
-    // Function to handle different nested JSON types for property values
-    async fn parse_property_value(value: &serde_json::Value) -> String {
-        match value {
-            serde_json::Value::String(text) => text.clone(),
-            serde_json::Value::Number(num) => num.to_string(),
-            serde_json::Value::Object(map) => {
-                // Handle time values
-                if let Some(time_value) = map.get("time") {
-                    let precision = map.get("precision").and_then(|p| p.as_u64()).unwrap_or(11);
-
-                    if let Some(time_str) = time_value.as_str() {
-                        if let Ok(parsed_date) = chrono::DateTime::parse_from_rfc3339(time_str.trim_start_matches('+')) {
-                            return match precision {
-                                9 => parsed_date.format("%Y").to_string(),      // Year precision
-                                10 => parsed_date.format("%Y-%m").to_string(),  // Month precision
-                                11 => parsed_date.format("%Y-%m-%d").to_string(), // Day precision
-                                _ => parsed_date.format("%Y-%m-%d %H:%M:%S").to_string(),
-                            };
-                        }
-                    }
-                    return "Invalid time format".to_string();
-                }
-
-                // Handle Wikidata entity references
-                if let Some(id) = map.get("id") {
-                    let entity_id = id.as_str().unwrap_or("");
-                    if entity_id.starts_with("Q") {
-                        return fetch_entity_labels(vec![entity_id]).await;
-                    }
-                }
-                serde_json::to_string(map).unwrap_or("Complex Object".to_string())
-            }
-            _ => "Unsupported data type".to_string(),
-        }
-    }
-
-    // Function to fetch labels for multiple Wikidata entities
-    async fn fetch_entity_labels(entity_ids: Vec<String>) -> Result<Vec<(String, String)>, String> {
-        let query = format!(
-            "PREFIX wdt: <http://www.wikidata.org/prop/direct/>
-            PREFIX wd: <http://www.wikidata.org/entity/>
-
-            SELECT ?item ?itemLabel
-            WHERE {{
-              VALUES ?item {{ {} }}
-              SERVICE wikibase:label {{
-                bd:serviceParam wikibase:language \"en\".
-              }}
-            }}",
-            entity_ids.join(" ")
+    //function to fetch properties
+    async fn fetch_item_properties(wikidata_id: &str) -> HashMap<String, String> {
+        let sparql_query = format!(
+            r#"
+            SELECT ?propLabel ?value ?valueLabel WHERE {{
+              wd:{} ?prop ?statement.
+              ?statement ?ps ?value.
+              ?property wikibase:claim ?prop.
+              ?property wikibase:statementProperty ?ps.
+              SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
+            }}
+            "#,
+            wikidata_id
         );
-    
-        let url = format!("https://query.wikidata.org/sparql?query={}", query);
-    
-        match Request::get(&url).send().await {
-            Ok(response) => {
-                if let Ok(data) = response.json::<Value>().await {
-                    let results = data["results"]["bindings"].as_array().unwrap_or(&vec![]).to_vec();
-                    let mut labels = Vec::new();
-                    for result in results {
-                        let item = result["item"]["value"].as_str().unwrap_or("");
-                        let label = result["itemLabel"]["value"].as_str().unwrap_or("");
-                        labels.push((item.to_string(), label.to_string()));
-                    }
-                    Ok(labels)
-                } else {
-                    Err("Failed to parse response".to_string())
-                }
-            }
-            Err(err) => Err(format!("Failed to fetch entity labels: {:?}", err)),
-        }
-    }
 
-    // Function to fetch properties for a specific Wikidata entity
-    async fn fetch_entity_properties(entity_id: String) -> Result<Vec<(String, String)>, String> {
-        let query = format!(
-            "PREFIX wdt: <http://www.wikidata.org/prop/direct/>
-            PREFIX wd: <http://www.wikidata.org/entity/>
-
-            SELECT ?property ?propertyLabel ?value
-            WHERE {{
-              VALUES ?item {{ wd:{} }}
-              ?item ?property ?value.
-              SERVICE wikibase:label {{
-                bd:serviceParam wikibase:language \"en\".
-              }}
-            }}",
-            entity_id
-        );
-    
-        let url = format!("https://query.wikidata.org/sparql?query={}", query);
-    
-        match Request::get(&url).send().await {
-            Ok(response) => {
-                if let Ok(data) = response.json::<Value>().await {
-                    let results = data["results"]["bindings"].as_array().unwrap_or(&vec![]).to_vec();
-                    let mut properties = Vec::new();
-                    for result in results {
-                        let property = result["property"]["value"].as_str().unwrap_or("");
-                        let value = result["value"]["value"].as_str().unwrap_or("");
-                        properties.push((property.to_string(), value.to_string()));
-                    }
-                    Ok(properties)
-                } else {
-                    Err("Failed to parse response".to_string())
-                }
-            }
-            Err(err) => Err(format!("Failed to fetch entity properties: {:?}", err)),
-        }
-    }
-
-    // Function to fetch labels for properties
-    async fn fetch_property_labels(property_ids: Vec<String>) -> HashMap<String, String> {
-        let mut property_labels = HashMap::new();
-    
-        // Construct the API URL to fetch labels for multiple properties
         let url = format!(
-            "https://www.wikidata.org/w/api.php?action=wbgetentities&ids={}&props=labels&format=json&languages=en&origin=*",
-            property_ids.join("|")
+            "https://query.wikidata.org/sparql?query={}&format=json",
+            urlencoding::encode(&sparql_query)
         );
-    
-        match gloo_net::http::Request::get(&url).send().await {
+
+        match gloo_net::http::Request::get(&url)
+            .header("Accept", "application/json")
+            .send()
+            .await
+        {
             Ok(response) => {
                 if let Ok(data) = response.json::<serde_json::Value>().await {
-                    if let Some(entities) = data["entities"].as_object() {
-                        for (property_id, entity) in entities {
-                            if let Some(label) = entity["labels"]["en"]["value"].as_str() {
-                                property_labels.insert(property_id.clone(), label.to_string());
-                            }
+                    let mut result = HashMap::new();
+                    if let Some(bindings) = data["results"]["bindings"].as_array() {
+                        for binding in bindings {
+                            let prop_label = binding["propLabel"]["value"].as_str().unwrap_or("").to_string();
+                            let value_label = binding["valueLabel"]["value"].as_str().unwrap_or("").to_string();
+                            result.insert(prop_label, value_label);
                         }
                     }
+                    result
+                } else {
+                    HashMap::new()
                 }
             }
-            Err(err) => log!("Error fetching property labels: {:?}", err),
+            Err(_) => HashMap::new(),
         }
-    
-        property_labels
     }
+    
+    async fn fetch_property_labels(property_ids: Vec<String>) -> HashMap<String, String> {
+        let property_ids_str = property_ids.join(" wd:");
+        let sparql_query = format!(
+            r#"
+            SELECT ?prop ?propLabel WHERE {{
+              VALUES ?prop {{ wd:{} }}
+              SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
+            }}
+            "#,
+            property_ids_str
+        );
 
-    // Function to add a new custom property
+        let url = format!(
+            "https://query.wikidata.org/sparql?query={}&format=json",
+            urlencoding::encode(&sparql_query)
+        );
+
+        match gloo_net::http::Request::get(&url)
+            .header("Accept", "application/json")
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if let Ok(data) = response.json::<serde_json::Value>().await {
+                    let mut result = HashMap::new();
+                    if let Some(bindings) = data["results"]["bindings"].as_array() {
+                        for binding in bindings {
+                            let prop_id = binding["prop"]["value"].as_str().unwrap_or("").split('/').last().unwrap_or("").to_string();
+                            let prop_label = binding["propLabel"]["value"].as_str().unwrap_or("").to_string();
+                            result.insert(prop_id, prop_label);
+                        }
+                    }
+                    result
+                } else {
+                    HashMap::new()
+                }
+            }
+            Err(_) => HashMap::new(),
+        }
+    }
+    
+    // Add a new custom property
     let add_property = move |property: String| {
         set_custom_properties.update(|props| {
             if !props.contains(&property) && !property.is_empty() {
                 props.push(property.clone());
 
-                // Update the selected_properties state when a new property is added
+                //update the selected_properties state when a new property is added
                 set_selected_properties.update(|selected| {
                     selected.insert(property.clone(), true);
                 });
@@ -444,7 +399,7 @@ pub fn ItemsList(
                 set_items.update(|items| {
                     for item in items {
                         item.custom_properties.entry(property.clone()).or_insert_with(|| "".to_string());
-
+                        
                         // Save the updated item to the database
                         let item_clone = item.clone();
                         spawn_local(async move {
@@ -456,18 +411,15 @@ pub fn ItemsList(
                 // Fetch the property label
                 let property_id = property.clone();
                 spawn_local(async move {
-                    let labels = fetch_entity_labels(vec![property_id.clone()]).await;
-                    if let Ok(labels) = labels {
-                        if let Some((_, label)) = labels.first() {
-                            set_property_labels.update(|labels_map| {
-                                labels_map.insert(property_id, label.clone());
-                            });
+                    let labels = fetch_property_labels(vec![property_id.clone()]).await;
+                    set_property_labels.update(|labels_map| {
+                        if let Some(label) = labels.get(&property_id) {
+                            labels_map.insert(property_id, label.clone());
                         }
-                    }
+                    });
                 });
             }
         });
-
         // Fetch the relevant value for each item and populate the corresponding cells
         set_items.update(|items| {
             for item in items {
@@ -477,25 +429,30 @@ pub fn ItemsList(
                     let set_property_labels = set_property_labels.clone();
                     let property_clone = property.clone();
                     spawn_local(async move {
-                        let properties = fetch_entity_properties(wikidata_id).await;
-                        if let Ok(properties) = properties {
-                            for (property, value) in properties {
-                                if property == &property_clone {
-                                    set_items.update(|items| {
-                                        if let Some(item) = items.iter_mut().find(|item| item.wikidata_id.as_ref().unwrap() == &wikidata_id) {
-                                            item.custom_properties.insert(property_clone.clone(), value.clone());
-                                        }
-                                    });
-                                }
+                        let properties = fetch_item_properties(&wikidata_id).await;
+                        // Update fetched properties and property labels
+                        set_fetched_properties.update(|fp| {
+                            fp.insert(wikidata_id.clone(), properties.clone());
+                        });
+                        set_property_labels.update(|pl| {
+                            for (key, value) in properties.iter() {
+                                pl.entry(key.clone()).or_insert_with(|| value.clone());
                             }
+                        });
+                        if let Some(value) = properties.get(&property_clone) {
+                            set_items.update(|items| {
+                                if let Some(item) = items.iter_mut().find(|item| item.wikidata_id.as_ref().unwrap() == &wikidata_id) {
+                                    item.custom_properties.insert(property_clone.clone(), value.clone());
+                                }
+                            });
                         }
                     });
                 }
             }
         });
     };
-
-    // Function to update item fields
+    
+    // Update item fields
     let update_item = move |index: usize, field: &str, value: String| {
         set_items.update(|items| {
             if let Some(item) = items.get_mut(index) {
@@ -511,10 +468,8 @@ pub fn ItemsList(
                                 let set_fetched_properties = set_fetched_properties.clone();
                                 let set_property_labels = set_property_labels.clone();
                                 spawn_local(async move {
-                                    let properties = fetch_entity_properties(wikidata_id).await;
-                                    if let Ok(properties) = properties {
-                                        log!("Fetched properties for index {}: {:?}", index, properties);
-                                    }
+                                    let properties = fetch_item_properties(&wikidata_id).await;
+                                    log!("Fetched properties for index {}: {:?}", index, properties);
                                 });
                             }
                         }
@@ -540,6 +495,7 @@ pub fn ItemsList(
                     id: Uuid::new_v4().to_string(),
                     name: String::new(),
                     description: String::new(),
+                    // reviews: vec![],
                     wikidata_id: None,
                     custom_properties: HashMap::new(),
                 };
@@ -654,17 +610,17 @@ pub fn ItemsList(
                                                                                         let set_fetched_properties = set_fetched_properties.clone();
                                                                                         let set_property_labels = set_property_labels.clone();
                                                                                         spawn_local(async move {
-                                                                                            let properties = fetch_entity_properties(wikidata_id).await;
-                                                                                            if let Ok(properties) = properties {
-                                                                                                // Populate the custom properties for the new item
-                                                                                                set_items.update(|items| {
-                                                                                                    if let Some(item) = items.iter_mut().find(|item| item.wikidata_id.as_ref() == Some(&wikidata_id)) {
-                                                                                                        for (property, value) in properties {
-                                                                                                            item.custom_properties.insert(property, value);
-                                                                                                        }
+                                                                                            let properties = fetch_item_properties(&wikidata_id).await;
+                                                                                            // log!("Fetched properties for Wikidata ID {}: {:?}", wikidata_id, properties);
+                                                                                            
+                                                                                            // Populate the custom properties for the new item
+                                                                                            set_items.update(|items| {
+                                                                                                if let Some(item) = items.iter_mut().find(|item| item.wikidata_id.as_ref() == Some(&wikidata_id)) {
+                                                                                                    for (property, value) in properties {
+                                                                                                        item.custom_properties.insert(property, value);
                                                                                                     }
-                                                                                                });
-                                                                                            }
+                                                                                                }
+                                                                                            });
                                                                                         });
 
                                                                                         // Hide the suggestion list
@@ -792,13 +748,11 @@ pub fn ItemsList(
                 } />
                 <datalist id="properties">
                     {move || {
-                        let properties = fetched_properties.get().clone();
                         let property_labels = property_labels.get().clone();
-                        properties.into_iter().map(|(key, _)| {
-                            let key_clone = key.clone();
-                            let label = property_labels.get(&key_clone).cloned().unwrap_or_else(|| key_clone.clone());
+                        property_labels.into_iter().map(|(property, label)| {
+                            let property_clone = property.clone();
                             view! {
-                                <option value={format!("{} - {}", key, label)}>{ format!("{} - {}", key, label) }</option>
+                                <option value={property}>{ format!("{} - {}", property_clone, label) }</option>
                             }
                         }).collect::<Vec<_>>()
                     }}
