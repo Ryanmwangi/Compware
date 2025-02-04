@@ -333,11 +333,14 @@ pub fn ItemsList(
                     if let Some(bindings) = data["results"]["bindings"].as_array() {
                         for binding in bindings {
                             let prop_label = binding["propLabel"]["value"].as_str().unwrap_or("").to_string();
+                            let prop_label = prop_label.replace("http://www.wikidata.org/prop/", "");
                             let value_label = binding["valueLabel"]["value"].as_str().unwrap_or("").to_string();
                             result.insert(prop_label, value_label);
+                            log!("result: {:?}", result);
                         }
                     }
                     result
+                   
                 } else {
                     HashMap::new()
                 }
@@ -432,19 +435,22 @@ pub fn ItemsList(
     
     // Add a new custom property
     let add_property = move |property: String| {
+        // Normalize the property ID
+        let normalized_property = property.replace("http://www.wikidata.org/prop/", "");
+        
         set_custom_properties.update(|props| {
-            if !props.contains(&property) && !property.is_empty() {
-                props.push(property.clone());
+            if !props.contains(&normalized_property) && !normalized_property.is_empty() {
+                props.push(normalized_property.clone());
 
                 //update the selected_properties state when a new property is added
                 set_selected_properties.update(|selected| {
-                    selected.insert(property.clone(), true);
+                    selected.insert(normalized_property.clone(), true);
                 });
 
                 // Ensure the grid updates reactively
                 set_items.update(|items| {
                     for item in items {
-                        item.custom_properties.entry(property.clone()).or_insert_with(|| "".to_string());
+                        item.custom_properties.entry(normalized_property.clone()).or_insert_with(|| "".to_string());
                         
                         // Save the updated item to the database
                         let item_clone = item.clone();
@@ -455,12 +461,14 @@ pub fn ItemsList(
                 });
 
                 // Fetch the property label
-                let property_id = property.clone();
+                let property_id = normalized_property.clone();
                 spawn_local(async move {
                     let labels = fetch_property_labels(vec![property_id.clone()]).await;
+                    log!("Fetched labels: {:?}", labels);
                     set_property_labels.update(|labels_map| {
-                        if let Some(label) = labels.get(&property_id) {
-                            labels_map.insert(property_id, label.clone());
+                        for (key, value) in labels {
+                            log!("Inserting label: {} -> {}", key, value);
+                            labels_map.insert(key, value);
                         }
                     });
                 });
@@ -721,9 +729,10 @@ pub fn ItemsList(
                     {move || {
                         let custom_props = custom_properties.get().clone();
                         custom_props.into_iter().map(move |property| {
-                            let property_clone = property.clone();
-                            let property_label = property_labels.get().get(&property_clone).cloned().unwrap_or_else(|| property_clone.clone());
-                            let property_clone_for_button = property_clone.clone();
+                            let normalized_property = property.replace("http://www.wikidata.org/prop/", "");
+                            let property_label = property_labels.get().get(&normalized_property).cloned().unwrap_or_else(|| normalized_property.clone());
+                            log!("Rendering property: {} -> {}", normalized_property, property_label);
+                            let property_clone_for_button = normalized_property.clone();
                             view! {
                                 <tr>
                                     <td>
@@ -745,7 +754,7 @@ pub fn ItemsList(
                                         }>{ "Delete" }</button>
                                     </td>
                                     {move || {
-                                        let property_clone_for_cells = property_clone.clone();
+                                        let property_clone_for_cells = normalized_property.clone();
                                         items.get().iter().enumerate().map(move |(index, item)| {
                                         let property_clone_for_closure = property_clone_for_cells.clone();
                                         view! {
