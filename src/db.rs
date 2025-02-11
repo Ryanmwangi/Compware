@@ -26,15 +26,25 @@ mod db_impl {
         pub async fn create_schema(&self) -> Result<(), Error> {
             let conn = self.conn.lock().await;
             conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS urls (
+                    id INTEGER PRIMARY KEY,
+                    url TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );",
+            )?;
+            logging::log!("URLs table created or verified");
+            conn.execute_batch(
                 "CREATE TABLE IF NOT EXISTS items (
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
                     description TEXT,
                     wikidata_id TEXT,
-                    custom_properties TEXT
+                    custom_properties TEXT,
+                    url_id INTEGER,
+                    FOREIGN KEY (url_id) REFERENCES urls (id)
                 );",
             )?;
-            logging::log!("Database schema created or verified");
+            logging::log!("Items table updated with foreign key to URLs table");
             Ok(())
         }
 
