@@ -116,7 +116,6 @@ pub fn ItemsList(
             id: Uuid::new_v4().to_string(),
             name: String::new(),
             description: String::new(),
-            // reviews: vec![],
             wikidata_id: None,
             custom_properties: HashMap::new(),
         }]);
@@ -206,7 +205,7 @@ pub fn ItemsList(
                         name: db_item.name,
                         description: db_item.description,
                         wikidata_id: db_item.wikidata_id,
-                        custom_properties, // Deserialized HashMap
+                        custom_properties,
                     }
                 })
                 .collect();
