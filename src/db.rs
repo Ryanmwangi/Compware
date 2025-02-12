@@ -48,13 +48,22 @@ mod db_impl {
             Ok(())
         }
 
+        // Insert a new URL into the database
+        pub async fn insert_url(&self, url: &str) -> Result<i64, Error> {
+            let conn = self.conn.lock().await;
+            let mut stmt = conn.prepare("INSERT INTO urls (url) VALUES (?)")?;
+            let url_id = stmt.insert(&[url])?;
+            logging::log!("URL inserted: {}", url);
+            Ok(url_id)
+        }
+
         // Insert a new item into the database
-        pub async fn insert_item(&self, item: &DbItem) -> Result<(), Error> {
+        pub async fn insert_item(&self, url_id: i64, item: &DbItem) -> Result<(), Error> {
             let conn = self.conn.lock().await;
             let wikidata_id = item.wikidata_id.as_ref().map(|s| s.as_str()).unwrap_or("");
             conn.execute(
-            "INSERT INTO items (id, name, description, wikidata_id, custom_properties)
-             VALUES (?, ?, ?, ?, ?)
+            "INSERT INTO items (id, name, description, wikidata_id, custom_properties, url_id)
+             VALUES (?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                  name = excluded.name,
                  description = excluded.description,
@@ -66,6 +75,7 @@ mod db_impl {
                 &item.description,
                 &wikidata_id.to_string(),
                 &item.custom_properties,
+                &url_id.to_string(),
             ],
         )?;
             logging::log!("Item inserted: {}", item.id);
@@ -106,6 +116,61 @@ mod db_impl {
             }
             logging::log!("Fetched {} items from the database", result.len()); // Log with Leptos
             Ok(result)
+        }
+
+        // Retrieve all items from the database for a specific URL
+        pub async fn get_items_by_url(&self, url: &str) -> Result<Vec<DbItem>, Error> {
+            let conn = self.conn.lock().await;
+            let url_id: i64  = conn.query_row("SELECT id FROM urls WHERE url = ?", &[url], |row| row.get(0))?;
+            let mut stmt = conn.prepare("SELECT * FROM items WHERE url_id = ?")?;
+            let items = stmt.query_map(&[&url_id], |row| {
+                Ok(DbItem {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    description: row.get(2)?,
+                    wikidata_id: row.get(3)?,
+                    custom_properties: row.get(4)?,
+                })
+            })?;
+            let mut result = Vec::new();
+            for item in items {
+                result.push(item?);
+            }
+            logging::log!("Fetched {} items from the database for URL: {}", result.len(), url);
+            Ok(result)
+        }
+
+        // Insert a new item into the database for a specific URL
+        pub async fn insert_item_by_url(&self, url: &str, item: &DbItem) -> Result<(), Error> {
+            let conn = self.conn.lock().await;
+            let url_id: i64 = conn.query_row("SELECT id FROM urls WHERE url = ?", &[url], |row| row.get(0))?;
+            if url_id == 0 {
+                let url_id = self.insert_url(url).await?;
+                self.insert_item(url_id, item).await?;
+            } else {
+                self.insert_item(url_id, item).await?;
+            }
+            logging::log!("Item inserted into the database for URL: {}", url);
+            Ok(())
+        }
+
+        // Delete an item from the database for a specific URL
+        pub async fn delete_item_by_url(&self, url: &str, item_id: &str) -> Result<(), Error> {
+            let conn = self.conn.lock().await;
+            let url_id: i64 = conn.query_row("SELECT id FROM urls WHERE url = ?", &[url], |row| row.get(0))?;
+            conn.execute("DELETE FROM items WHERE id = ? AND url_id = ?", &[item_id, &url_id.to_string()])?;
+            logging::log!("Item deleted from the database for URL: {}", url);
+            Ok(())
+        }
+
+        // Delete a property from the database for a specific URL
+        pub async fn delete_property_by_url(&self, url: &str, property: &str) -> Result<(), Error> {
+            let conn = self.conn.lock().await;
+            let url_id: i64 = conn.query_row("SELECT id FROM urls WHERE url = ?", &[url], |row| row.get(0))?;
+            let query = format!("UPDATE items SET custom_properties = json_remove(custom_properties, '$.{}') WHERE url_id = ?", property);
+            conn.execute(&query, &[&url_id.to_string()])?;
+            logging::log!("Property deleted from the database for URL: {}", url);
+            Ok(())
         }
     }
 
