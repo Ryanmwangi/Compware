@@ -8,9 +8,7 @@ use crate::models::item::Item;
 use std::collections::HashMap;
 use std::sync::Arc;
 use wasm_bindgen::JsCast;
-use urlencoding::encode;
-use gloo_net::http::Request;
-use serde_json::Value;
+use web_sys::window;
 
 #[derive(Deserialize, Clone, Debug)]
 struct WikidataSuggestion {
@@ -52,8 +50,16 @@ pub fn ItemsList(
     // Signal to store the fetched property labels
     let (property_labels, set_property_labels) = create_signal(HashMap::<String, String>::new());
     
+    fn get_current_url() -> String {
+        window()
+            .and_then(|win| win.location().href().ok())
+            .unwrap_or_else(|| "".to_string())
+    }
+
+    let current_url = get_current_url();
+
     spawn_local(async move {
-        match load_items_from_db().await {
+        match load_items_from_db(&current_url).await {
             Ok(loaded_items) => {
                 // Set the loaded items
                 if loaded_items.is_empty() {
@@ -172,8 +178,8 @@ pub fn ItemsList(
     }
 
     //function to load items from database
-    async fn load_items_from_db() -> Result<Vec<Item>, String> {
-        let response = gloo_net::http::Request::get("/api/items")
+    async fn load_items_from_db(url: &str) -> Result<Vec<Item>, String> {
+        let response = gloo_net::http::Request::get("/api/items?url={}")
             .send()
             .await
             .map_err(|err| format!("Failed to fetch items: {:?}", err))?;
