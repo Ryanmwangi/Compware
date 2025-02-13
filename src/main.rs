@@ -1,4 +1,6 @@
 #[cfg(feature = "ssr")]
+use actix_web::{web, HttpResponse};
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     use actix_files::Files;
@@ -55,10 +57,25 @@ async fn main() -> std::io::Result<()> {
             //.wrap(middleware::Compress::default())
             // Pass the database as shared state
             .app_data(web::Data::new(db))
+            // Register URL routing
+            .service(web::resource("/").route(web::get().to(index)))
+            .service(web::resource("/{url}").route(web::get().to(url_handler)))
     })
     .bind(&addr)?
     .run()
     .await
+}
+#[cfg(feature = "ssr")]
+// Define the index handler
+async fn index() -> HttpResponse {
+    HttpResponse::Ok().body("Welcome to CompareWare!")
+}
+#[cfg(feature = "ssr")]
+// Define the URL handler
+async fn url_handler(url: web::Path<String>) -> HttpResponse {
+    let url = url.into_inner();
+    // TO DO: Implement URL-based content storage and editing functionality
+    HttpResponse::Ok().body(format!("You are viewing the content at {}", url))
 }
 
 #[cfg(feature = "ssr")]
