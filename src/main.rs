@@ -1,5 +1,9 @@
 #[cfg(feature = "ssr")]
-use actix_web::{web, HttpResponse};
+use actix_web::{web, App, HttpServer, HttpResponse, Responder};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use compareware::db::{Database, DbItem};
+use compareware::api::{create_item, get_items, delete_item_by_url};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -9,7 +13,7 @@ async fn main() -> std::io::Result<()> {
     use leptos_actix::{generate_route_list, LeptosRoutes};
     use compareware::app::*;
     use compareware::db::{Database, DbItem};
-    use compareware::api::{get_items, create_item, delete_item, delete_property}; // Import API handlers
+    use compareware::api::{get_items, create_item, delete_item, delete_property, delete_item_by_url, delete_property_by_url, create_item_by_url, get_items_by_url}; // Import API handlers
     use std::sync::Arc;
     use tokio::sync::Mutex;
 
@@ -34,6 +38,10 @@ async fn main() -> std::io::Result<()> {
 
 
         App::new()
+            .app_data(web::Data::new(db.clone()))
+            .route("/{url}/items", web::get().to(get_items_handler))
+            .route("/{url}/items", web::post().to(create_item_handler))
+            .route("/{url}/items/{item_id}", web::delete().to(delete_item_handler))
             // Register custom API routes BEFORE Leptos server functions
             .service(
                 web::scope("/api")
@@ -64,6 +72,32 @@ async fn main() -> std::io::Result<()> {
     .bind(&addr)?
     .run()
     .await
+}
+
+// Handler to get items for a specific URL
+async fn get_items_handler(
+    db: web::Data<Arc<Mutex<Database>>>,
+    url: web::Path<String>,
+) -> impl Responder {
+    get_items(db, web::Query(url.into_inner())).await
+}
+
+// Handler to create an item for a specific URL
+async fn create_item_handler(
+    db: web::Data<Arc<Mutex<Database>>>,
+    url: web::Path<String>,
+    item: web::Json<DbItem>,
+) -> impl Responder {
+    create_item(db, web::Query(url.into_inner()), item).await
+}
+
+// Handler to delete an item for a specific URL
+async fn delete_item_handler(
+    db: web::Data<Arc<Mutex<Database>>>,
+    path: web::Path<(String, String)>,
+) -> impl Responder {
+    let (url, item_id) = path.into_inner();
+    delete_item_by_url(db, web::Path::from(url), web::Path::from(item_id)).await
 }
 #[cfg(feature = "ssr")]
 // Define the index handler
