@@ -25,26 +25,50 @@ mod db_impl {
         // Create the database schema
         pub async fn create_schema(&self) -> Result<(), Error> {
             let conn = self.conn.lock().await;
+            
+            // 1. Properties table
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS properties (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,  // Property name
+                    global_usage_count INTEGER DEFAULT 0  // Track usage across ALL URLs
+                );"
+            )?;
+
+            // 2. URLs table
             conn.execute_batch(
                 "CREATE TABLE IF NOT EXISTS urls (
                     id INTEGER PRIMARY KEY,
-                    url TEXT NOT NULL,
+                    url TEXT NOT NULL UNIQUE,  // Enforce unique URLs
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );",
             )?;
             logging::log!("URLs table created or verified");
+
+            // 3. Items table
             conn.execute_batch(
                 "CREATE TABLE IF NOT EXISTS items (
                     id TEXT PRIMARY KEY,
+                    url_id INTEGER NOT NULL,
                     name TEXT NOT NULL,
                     description TEXT,
                     wikidata_id TEXT,
-                    custom_properties TEXT,
-                    url_id INTEGER,
-                    FOREIGN KEY (url_id) REFERENCES urls (id)
+                    FOREIGN KEY (url_id) REFERENCES urls(id) ON DELETE CASCADE
                 );",
             )?;
             logging::log!("Items table updated with foreign key to URLs table");
+            
+            // 4. Junction table for custom properties
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS item_properties (
+                    item_id TEXT NOT NULL,
+                    property_id INTEGER NOT NULL,
+                    value TEXT NOT NULL,
+                    PRIMARY KEY (item_id, property_id),
+                    FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE,
+                    FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE
+                );"
+            )?;
             Ok(())
         }
 
