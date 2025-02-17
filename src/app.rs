@@ -2,7 +2,7 @@ use leptos::*;
 use leptos_meta::*;
 use leptos_router::*; 
 use leptos::logging::log;
-use crate::components::items_list::ItemsList;
+use crate::components::items_list::{ItemsList, load_items_from_db};
 use crate::models::item::Item;
 use crate::nostr::NostrClient;
 use tokio::sync::mpsc;

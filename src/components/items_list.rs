@@ -27,6 +27,51 @@ struct DbItem {
     custom_properties: String,
 }
 
+//function to load items from database
+pub async fn load_items_from_db(current_url: &str) -> Result<Vec<Item>, String> {
+    let response = gloo_net::http::Request::get("/api/items?url={}")
+        .send()
+        .await
+        .map_err(|err| format!("Failed to fetch items: {:?}", err))?;
+
+    if response.status() == 200 {
+        // Deserialize into Vec<DbItem>
+        log!("Loading items from DB...");
+        let db_items = response
+            .json::<Vec<DbItem>>()
+            .await
+            .map_err(|err| format!("Failed to parse items: {:?}", err))?;
+
+        // log!("Deserialized DB items: {:?}", db_items);
+
+        // Convert DbItem to Item
+        let items = db_items
+            .into_iter()
+            .map(|db_item| {
+                // Deserialize `custom_properties` from a JSON string to a HashMap
+                let custom_properties: HashMap<String, String> =
+                    serde_json::from_str(&db_item.custom_properties)
+                        .unwrap_or_default(); // Fallback to an empty HashMap if deserialization fails
+                
+                log!("Loaded item: {:?}", db_item.id);
+                log!("Custom properties: {:?}", custom_properties);
+                
+                Item {
+                    id: db_item.id,
+                    name: db_item.name,
+                    description: db_item.description,
+                    wikidata_id: db_item.wikidata_id,
+                    custom_properties,
+                }
+            })
+            .collect();
+        // log!("Converted items: {:?}", items);
+        Ok(items)
+    } else {
+        Err(format!("Failed to fetch items: {}", response.status_text()))
+    }
+}
+
 #[component]
 pub fn ItemsList(
     items: ReadSignal<Vec<Item>>,
@@ -174,51 +219,6 @@ pub fn ItemsList(
                 }
             }
             Err(err) => log!("Failed to save item: {:?}", err),
-        }
-    }
-
-    //function to load items from database
-    async fn load_items_from_db(url: &str) -> Result<Vec<Item>, String> {
-        let response = gloo_net::http::Request::get("/api/items?url={}")
-            .send()
-            .await
-            .map_err(|err| format!("Failed to fetch items: {:?}", err))?;
-    
-        if response.status() == 200 {
-            // Deserialize into Vec<DbItem>
-            log!("Loading items from DB...");
-            let db_items = response
-                .json::<Vec<DbItem>>()
-                .await
-                .map_err(|err| format!("Failed to parse items: {:?}", err))?;
-
-            // log!("Deserialized DB items: {:?}", db_items);
-    
-            // Convert DbItem to Item
-            let items = db_items
-                .into_iter()
-                .map(|db_item| {
-                    // Deserialize `custom_properties` from a JSON string to a HashMap
-                    let custom_properties: HashMap<String, String> =
-                        serde_json::from_str(&db_item.custom_properties)
-                            .unwrap_or_default(); // Fallback to an empty HashMap if deserialization fails
-                    
-                    log!("Loaded item: {:?}", db_item.id);
-                    log!("Custom properties: {:?}", custom_properties);
-                    
-                    Item {
-                        id: db_item.id,
-                        name: db_item.name,
-                        description: db_item.description,
-                        wikidata_id: db_item.wikidata_id,
-                        custom_properties,
-                    }
-                })
-                .collect();
-            // log!("Converted items: {:?}", items);
-            Ok(items)
-        } else {
-            Err(format!("Failed to fetch items: {}", response.status_text()))
         }
     }
 
