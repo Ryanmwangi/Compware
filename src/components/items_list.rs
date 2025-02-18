@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use wasm_bindgen::JsCast;
 use web_sys::window;
-
+use std::rc::Rc;
 #[derive(Deserialize, Clone, Debug)]
 struct WikidataSuggestion {
     id: String,
@@ -29,7 +29,7 @@ struct DbItem {
 
 //function to load items from database
 pub async fn load_items_from_db(current_url: &str) -> Result<Vec<Item>, String> {
-    let response = gloo_net::http::Request::get("/api/items?url={}")
+    let response = gloo_net::http::Request::get(&format!("/api/items?url={}", current_url))
         .send()
         .await
         .map_err(|err| format!("Failed to fetch items: {:?}", err))?;
@@ -101,9 +101,11 @@ pub fn ItemsList(
             .unwrap_or_else(|| "".to_string())
     }
 
-    let current_url = get_current_url();
+    let current_url = Rc::new(get_current_url());
 
-    spawn_local(async move {
+    spawn_local({
+        let current_url = Rc::clone(&current_url);
+        async move {
         match load_items_from_db(&current_url).await {
             Ok(loaded_items) => {
                 // Set the loaded items
@@ -158,7 +160,7 @@ pub fn ItemsList(
                 log!("Error loading items: {}", err);
             }
         }
-    });
+    }});
 
 
     // Ensure there's an initial empty row
@@ -173,7 +175,7 @@ pub fn ItemsList(
     }
     
     // Function to send an item to the backend API
-    async fn save_item_to_db(item: Item, selected_properties: ReadSignal<HashMap<String, bool>>) {
+    async fn save_item_to_db(item: Item, selected_properties: ReadSignal<HashMap<String, bool>>, current_url: String) {
         // Use a reactive closure to access `selected_properties`
         let custom_properties: HashMap<String, String> = (move || {
             let selected_props = selected_properties.get(); // Access the signal inside a reactive closure
@@ -189,6 +191,7 @@ pub fn ItemsList(
         // Create a new struct to send to the backend
         #[derive(Serialize, Debug)]
         struct ItemToSend {
+            url: String,
             id: String,
             name: String,
             description: String,
@@ -197,6 +200,7 @@ pub fn ItemsList(
         }
     
         let item_to_send = ItemToSend {
+            url: current_url.to_string(),
             id: item.id,
             name: item.name,
             description: item.description,
@@ -439,7 +443,10 @@ pub fn ItemsList(
     }
     
     // Add a new custom property
-    let add_property = move |property: String| {
+    let add_property = {
+        let current_url = Rc::clone(&current_url);
+        let set_items = set_items.clone();
+        Arc::new(move |property: String| {
         // Normalize the property ID
         let normalized_property = property.replace("http://www.wikidata.org/prop/", "");
         
@@ -459,8 +466,11 @@ pub fn ItemsList(
                         
                         // Save the updated item to the database
                         let item_clone = item.clone();
-                        spawn_local(async move {
-                            save_item_to_db(item_clone, selected_properties).await;
+                        spawn_local({
+                            let current_url = Rc::clone(&current_url);
+                            async move {
+                                save_item_to_db(item_clone, selected_properties, current_url.to_string()).await;
+                            }
                         });
                     }
                 });
@@ -509,11 +519,16 @@ pub fn ItemsList(
                 }
             }
         });
-    };
+    })};
     
     // Update item fields
-    let update_item = move |index: usize, field: &str, value: String| {
-        set_items.update(|items| {
+    let update_item = {
+        let set_items = set_items.clone();
+        let current_url = Rc::clone(&current_url);
+        Arc::new(move |index: usize, field: &str, value: String| {
+        let set_items = set_items.clone();
+        let current_url = Rc::clone(&current_url);
+        set_items.update(move|items| {
             if let Some(item) = items.get_mut(index) {
                 match field {
                     "name" => {
@@ -544,8 +559,11 @@ pub fn ItemsList(
 
                 // Save the updated item to the database
                 let item_clone = item.clone();
-                spawn_local(async move {
-                    save_item_to_db(item_clone, selected_properties).await;
+                spawn_local({
+                    let current_url = Rc::clone(&current_url);
+                    async move {
+                        save_item_to_db(item_clone, selected_properties, current_url.to_string()).await;
+                    }
                 });
             }
             // Automatically add a new row when editing the last row
@@ -561,13 +579,16 @@ pub fn ItemsList(
                 items.push(new_item.clone());
 
                 // Save the new item to the database
-                spawn_local(async move {
-                    save_item_to_db(new_item, selected_properties).await;
+                spawn_local({
+                    let current_url = Rc::clone(&current_url);
+                    async move {
+                        save_item_to_db(new_item, selected_properties, current_url.to_string()).await;
+                    }
                 });
             }
             log!("Items updated: {:?}", items);
         });
-    };
+    })};
 
     // List of properties to display as rows
     let properties = vec!["Name", "Description"];
@@ -591,11 +612,13 @@ pub fn ItemsList(
                 </thead>
                 <tbody>
                     {properties.into_iter().map(|property| {
+                        let update_item_cloned = Arc::clone(&update_item);
                         log!("Rendering property: {}", property);
                         view! {
                             <tr>
                                 <td>{ property }</td>
                                 {move || items.get().iter().enumerate().map(|(index, item)| {
+                                    let update_item_clone = Arc::clone(&update_item_cloned);
                                         view! {
                                             <td>
                                             {match property {
@@ -604,7 +627,7 @@ pub fn ItemsList(
                                                         <EditableCell
                                                             value=item.name.clone()
                                                             on_input=move |value| {
-                                                                update_item(index, "name", value.clone());
+                                                                update_item_clone(index, "name", value.clone());
                                                                 fetch_wikidata_suggestions(format!("name-{}", index), value);
                                                             }
                                                             key=Arc::new(format!("name-{}", index))
@@ -707,7 +730,7 @@ pub fn ItemsList(
                                                 "Description" => view! {
                                                 <EditableCell
                                                     value=item.description.clone()
-                                                    on_input=move |value| update_item(index, "description", value)
+                                                    on_input=move |value| update_item_clone(index, "description", value)
                                                     key=Arc::new(format!("description-{}", index))
                                                     focused_cell=focused_cell
                                                     set_focused_cell=set_focused_cell.clone()
@@ -731,9 +754,14 @@ pub fn ItemsList(
                         }
                     }).collect::<Vec<_>>()}
                     // Dynamically adding custom properties as columns
-                    {move || {
+                    {{
+                        let update_item_outer = Arc::clone(&update_item);
+
+                        move || {
+                        let update_item = Arc::clone(&update_item_outer);
                         let custom_props = custom_properties.get().clone();
                         custom_props.into_iter().map(move |property| {
+                            let update_item_inner = Arc::clone(&update_item);
                             let normalized_property = property.replace("http://www.wikidata.org/prop/", "");
                             let property_label = property_labels.get().get(&normalized_property).cloned().unwrap_or_else(|| normalized_property.clone());
                             log!("Rendering property: {} -> {}", normalized_property, property_label);
@@ -759,14 +787,16 @@ pub fn ItemsList(
                                         }>{ "Delete" }</button>
                                     </td>
                                     {move || {
+                                        let update_item_cell = Arc::clone(&update_item_inner);
                                         let property_clone_for_cells = normalized_property.clone();
                                         items.get().iter().enumerate().map(move |(index, item)| {
-                                        let property_clone_for_closure = property_clone_for_cells.clone();
+                                            let update_item_cell = Arc::clone(&update_item_cell);
+                                            let property_clone_for_closure = property_clone_for_cells.clone();
                                         view! {
                                             <td>
                                                 <EditableCell
                                                     value=item.custom_properties.get(&property_clone_for_closure).cloned().unwrap_or_default()
-                                                    on_input=move |value| update_item(index, &property_clone_for_closure, value)
+                                                    on_input=move |value| update_item_cell(index, &property_clone_for_closure, value)
                                                     key=Arc::new(format!("custom-{}-{}", property_clone_for_cells, index))
                                                     focused_cell=focused_cell
                                                     set_focused_cell=set_focused_cell.clone()
@@ -782,7 +812,7 @@ pub fn ItemsList(
                                     }
                                 </tr>
                             }
-                        }).collect::<Vec<_>>()
+                        }).collect::<Vec<_>>()}
                     }}
                 </tbody>
             </table>
