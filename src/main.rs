@@ -1,9 +1,9 @@
 #[cfg(feature = "ssr")]
-use actix_web::{web, App, HttpServer, HttpResponse, Responder};
+use actix_web::{web, HttpResponse, Responder};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use compareware::db::{Database, DbItem};
-use compareware::api::{create_item, get_items, delete_item_by_url};
+use compareware::api::{ItemRequest,create_item, get_items, delete_item_by_url};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -12,7 +12,7 @@ async fn main() -> std::io::Result<()> {
     use leptos::*;
     use leptos_actix::{generate_route_list, LeptosRoutes};
     use compareware::app::*;
-    use compareware::db::{Database, DbItem};
+    use compareware::db::Database;
     use compareware::api::{get_items, create_item, delete_item, delete_property, delete_item_by_url, delete_property_by_url, create_item_by_url, get_items_by_url}; // Import API handlers
     use std::sync::Arc;
     use tokio::sync::Mutex;
@@ -85,10 +85,15 @@ async fn get_items_handler(
 // Handler to create an item for a specific URL
 async fn create_item_handler(
     db: web::Data<Arc<Mutex<Database>>>,
-    url: web::Path<String>,
+    path: web::Path<String>,
     item: web::Json<DbItem>,
 ) -> impl Responder {
-    create_item(db, web::Query(url.into_inner()), item).await
+    let url = path.into_inner();
+    let request = ItemRequest { 
+        url, 
+        item: item.into_inner() 
+    };
+    create_item(db, web::Json(request)).await
 }
 
 // Handler to delete an item for a specific URL
