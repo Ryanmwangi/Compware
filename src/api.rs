@@ -7,6 +7,14 @@ use std::sync::Arc;
 #[cfg(feature = "ssr")]
 use tokio::sync::Mutex;
 
+use serde::Deserialize;
+#[cfg(feature = "ssr")]
+#[derive(Deserialize)]
+pub struct ItemRequest {
+    pub url: String,
+    pub item: DbItem,
+}
+
 #[cfg(feature = "ssr")]
 pub async fn get_items(
     db: web::Data<Arc<Mutex<Database>>>,
@@ -25,16 +33,11 @@ pub async fn get_items(
 #[cfg(feature = "ssr")]
 pub async fn create_item(
     db: web::Data<Arc<Mutex<Database>>>,
-    url: web::Query<String>,
-    item: web::Json<DbItem>,
+    request: web::Json<ItemRequest>,
 ) -> HttpResponse {
-    let db = db.lock().await;
-    match db.insert_item_by_url(&url, &item.into_inner()).await {
-        Ok(_) => HttpResponse::Ok().body("Item inserted"),
-        Err(err) => {
-            leptos::logging::error!("Failed to insert item: {:?}", err);
-            HttpResponse::InternalServerError().body("Failed to insert item")
-        }
+    match db.lock().await.insert_item_by_url(&request.url, &request.item).await {
+        Ok(_) => HttpResponse::Ok().body("Item created"),
+        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }
 
