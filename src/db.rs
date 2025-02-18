@@ -5,6 +5,8 @@ mod db_impl {
     use std::sync::Arc;
     use tokio::sync::Mutex;
     use leptos::logging;
+    use serde_json;
+    use std::collections::HashMap;
 
     // Define a struct to represent a database connection
     #[derive(Debug)]
@@ -30,8 +32,8 @@ mod db_impl {
             conn.execute_batch(
                 "CREATE TABLE IF NOT EXISTS properties (
                     id INTEGER PRIMARY KEY,
-                    name TEXT NOT NULL UNIQUE,  // Property name
-                    global_usage_count INTEGER DEFAULT 0  // Track usage across ALL URLs
+                    name TEXT NOT NULL UNIQUE, 
+                    global_usage_count INTEGER DEFAULT 0
                 );"
             )?;
 
@@ -164,17 +166,69 @@ mod db_impl {
             Ok(result)
         }
 
-        // Insert a new item into the database for a specific URL
-        pub async fn insert_item_by_url(&self, url: &str, item: &DbItem) -> Result<(), Error> {
+        async fn get_url_id(&self, url: &str) -> Result<Option<i64>, Error> {
             let conn = self.conn.lock().await;
-            let url_id: i64 = conn.query_row("SELECT id FROM urls WHERE url = ?", &[url], |row| row.get(0))?;
-            if url_id == 0 {
-                let url_id = self.insert_url(url).await?;
-                self.insert_item(url_id, item).await?;
-            } else {
-                self.insert_item(url_id, item).await?;
+            conn.query_row(
+                "SELECT id FROM urls WHERE url = ?",
+                &[url],
+                |row| row.get(0)
+            )
+        }
+
+        async fn get_or_create_property(&self, prop: &str) -> Result<i64, Error> {
+            let conn = self.conn.lock().await;
+            // Check existing
+            let exists: Result<i64, _> = conn.query_row(
+                "SELECT id FROM properties WHERE name = ?",
+                &[prop],
+                |row| row.get(0)
+            );
+            
+            match exists {
+                Ok(id) => Ok(id),
+                Err(_) => {
+                    conn.execute(
+                        "INSERT INTO properties (name) VALUES (?)",
+                        &[prop],
+                    )?;
+                    Ok(conn.last_insert_rowid())
+                }
             }
-            logging::log!("Item inserted into the database for URL: {}", url);
+        }
+
+        // Insert a new item into the database for a specific URL
+        pub async fn insert_item_by_url(
+            &self, 
+            url: &str,
+            item: &DbItem
+        ) -> Result<(), Error> {
+            let conn = self.conn.lock().await;
+            // Get or create URL record
+            let url_id = match self.get_url_id(url).await {
+                Ok(Some(id)) => id,
+                _ => self.insert_url(url).await?,
+            };
+        
+            // Insert item with URL relationship
+            conn.execute(
+                "INSERT INTO items (id, url_id, name, description, wikidata_id) 
+                VALUES (?, ?, ?, ?, ?)",
+                &[&item.id, &url_id.to_string(), &item.name, 
+                &item.description, &item.wikidata_id.as_ref().unwrap_or(&String::new())],
+            )?;
+
+            let custom_props: HashMap<String, String> = serde_json::from_str(&item.custom_properties)
+            .map_err(|e| Error::ToSqlConversionFailure(e.into()))?;
+
+            // Handle properties through junction table
+            for (prop, value) in custom_props {
+                let prop_id = self.get_or_create_property(&prop).await?;
+                conn.execute(
+                    "INSERT INTO item_properties (item_id, property_id, value)
+                    VALUES (?, ?, ?)",
+                    &[&item.id, &prop_id.to_string(), &value],
+                )?;
+            }
             Ok(())
         }
 
