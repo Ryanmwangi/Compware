@@ -19,7 +19,7 @@ struct WikidataSuggestion {
 
 
 #[derive(Deserialize, Debug)]
-struct DbItem {
+pub struct DbItem {
     id: String,
     name: String,
     description: String,
