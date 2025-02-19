@@ -7,6 +7,7 @@ mod db_impl {
     use leptos::logging;
     use serde_json;
     use std::collections::HashMap;
+    use crate::models::item::Item;
 
     // Define a struct to represent a database connection
     #[derive(Debug)]
@@ -83,31 +84,6 @@ mod db_impl {
             Ok(url_id)
         }
 
-        // Insert a new item into the database
-        pub async fn insert_item(&self, url_id: i64, item: &DbItem) -> Result<(), Error> {
-            let conn = self.conn.lock().await;
-            let wikidata_id = item.wikidata_id.as_ref().map(|s| s.as_str()).unwrap_or("");
-            conn.execute(
-            "INSERT INTO items (id, name, description, wikidata_id, custom_properties, url_id)
-             VALUES (?, ?, ?, ?, ?, ?)
-             ON CONFLICT(id) DO UPDATE SET
-                 name = excluded.name,
-                 description = excluded.description,
-                 wikidata_id = excluded.wikidata_id,
-                 custom_properties = excluded.custom_properties;",
-            &[
-                &item.id,
-                &item.name,
-                &item.description,
-                &wikidata_id.to_string(),
-                &item.custom_properties,
-                &url_id.to_string(),
-            ],
-        )?;
-            logging::log!("Item inserted: {}", item.id);
-            Ok(())
-        }
-
         pub async fn delete_item(&self, item_id: &str) -> Result<(), Error> {
             let conn = self.conn.lock().await;
             conn.execute("DELETE FROM items WHERE id = ?", &[item_id])?;
@@ -133,7 +109,6 @@ mod db_impl {
                     name: row.get(1)?,
                     description: row.get(2)?,
                     wikidata_id: row.get(3)?,
-                    custom_properties: row.get(4)?,
                 })
             })?;
             let mut result = Vec::new();
@@ -145,25 +120,46 @@ mod db_impl {
         }
 
         // Retrieve all items from the database for a specific URL
-        pub async fn get_items_by_url(&self, url: &str) -> Result<Vec<DbItem>, Error> {
+        pub async fn get_items_by_url(&self, url: &str) -> Result<Vec<Item>, Error> {
             let conn = self.conn.lock().await;
             let url_id: i64  = conn.query_row("SELECT id FROM urls WHERE url = ?", &[url], |row| row.get(0))?;
-            let mut stmt = conn.prepare("SELECT * FROM items WHERE url_id = ?")?;
-            let items = stmt.query_map(&[&url_id], |row| {
-                Ok(DbItem {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    description: row.get(2)?,
-                    wikidata_id: row.get(3)?,
-                    custom_properties: row.get(4)?,
-                })
+            let mut stmt = conn.prepare(
+                "SELECT i.id, i.name, i.description, i.wikidata_id, 
+                        p.name AS prop_name, ip.value
+                 FROM items i
+                 LEFT JOIN item_properties ip ON i.id = ip.item_id
+                 LEFT JOIN properties p ON ip.property_id = p.id
+                 WHERE i.url_id = ?"
+            )?;
+            let mut items: HashMap<String, Item> = HashMap::new();
+            
+            let rows = stmt.query_map([url_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,  // id
+                    row.get::<_, String>(1)?,  // name
+                    row.get::<_, String>(2)?,  // description
+                    row.get::<_, Option<String>>(3)?,  // wikidata_id
+                    row.get::<_, Option<String>>(4)?,  // prop_name
+                    row.get::<_, Option<String>>(5)?,  // value
+                ))
             })?;
-            let mut result = Vec::new();
-            for item in items {
-                result.push(item?);
+        
+            for row in rows {
+                let (id, name, desc, wd_id, prop, val) = row?;
+                let item = items.entry(id.clone()).or_insert(Item {
+                    id,
+                    name,
+                    description: desc,
+                    wikidata_id: wd_id,
+                    custom_properties: HashMap::new(),
+                });
+                
+                if let (Some(p), Some(v)) = (prop, val) {
+                    item.custom_properties.insert(p, v);
+                }
             }
-            logging::log!("Fetched {} items from the database for URL: {}", result.len(), url);
-            Ok(result)
+        
+            Ok(items.into_values().collect())
         }
 
         async fn get_url_id(&self, url: &str) -> Result<Option<i64>, Error> {
@@ -200,7 +196,7 @@ mod db_impl {
         pub async fn insert_item_by_url(
             &self, 
             url: &str,
-            item: &DbItem
+            item: &Item 
         ) -> Result<(), Error> {
             let conn = self.conn.lock().await;
             // Get or create URL record
@@ -217,11 +213,8 @@ mod db_impl {
                 &item.description, &item.wikidata_id.as_ref().unwrap_or(&String::new())],
             )?;
 
-            let custom_props: HashMap<String, String> = serde_json::from_str(&item.custom_properties)
-            .map_err(|e| Error::ToSqlConversionFailure(e.into()))?;
-
             // Handle properties through junction table
-            for (prop, value) in custom_props {
+            for (prop, value) in &item.custom_properties {
                 let prop_id = self.get_or_create_property(&prop).await?;
                 conn.execute(
                     "INSERT INTO item_properties (item_id, property_id, value)
@@ -245,8 +238,18 @@ mod db_impl {
         pub async fn delete_property_by_url(&self, url: &str, property: &str) -> Result<(), Error> {
             let conn = self.conn.lock().await;
             let url_id: i64 = conn.query_row("SELECT id FROM urls WHERE url = ?", &[url], |row| row.get(0))?;
-            let query = format!("UPDATE items SET custom_properties = json_remove(custom_properties, '$.{}') WHERE url_id = ?", property);
-            conn.execute(&query, &[&url_id.to_string()])?;
+            
+            // Delete from junction table instead of JSON
+            conn.execute(
+                "DELETE FROM item_properties 
+                 WHERE property_id IN (
+                     SELECT id FROM properties WHERE name = ?
+                 ) AND item_id IN (
+                     SELECT id FROM items WHERE url_id = ?
+                 )",
+                &[property, &url_id.to_string()],
+            )?;
+            
             logging::log!("Property deleted from the database for URL: {}", url);
             Ok(())
         }
@@ -259,31 +262,8 @@ mod db_impl {
         pub name: String,
         pub description: String,
         pub wikidata_id: Option<String>,
-        pub custom_properties: String,
-    }
-
-    // Implement conversion from DbItem to a JSON-friendly format
-    #[derive(Debug, Deserialize, Serialize, Clone)]
-    pub struct ItemResponse {
-        pub id: String,
-        pub name: String,
-        pub description: String,
-        pub wikidata_id: Option<String>,
-        pub custom_properties: String,
-    }
-
-    impl From<DbItem> for ItemResponse {
-        fn from(item: DbItem) -> Self {
-            ItemResponse {
-                id: item.id,
-                name: item.name,
-                description: item.description,
-                wikidata_id: item.wikidata_id,
-                custom_properties: item.custom_properties,
-            }
-        }
     }
 }
 
 #[cfg(feature = "ssr")]
-pub use db_impl::{Database, DbItem, ItemResponse};
+pub use db_impl::{Database, DbItem};

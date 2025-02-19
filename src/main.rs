@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use compareware::db::{Database, DbItem};
 use compareware::api::{ItemRequest,create_item, get_items, delete_item_by_url};
+use compareware::models::item::Item;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -16,6 +17,7 @@ async fn main() -> std::io::Result<()> {
     use compareware::api::{get_items, create_item, delete_item, delete_property, delete_item_by_url, delete_property_by_url, create_item_by_url, get_items_by_url}; // Import API handlers
     use std::sync::Arc;
     use tokio::sync::Mutex;
+    
 
     // Load configuration
     let conf = get_configuration(None).await.unwrap();
@@ -86,7 +88,7 @@ async fn get_items_handler(
 async fn create_item_handler(
     db: web::Data<Arc<Mutex<Database>>>,
     path: web::Path<String>,
-    item: web::Json<DbItem>,
+    item: web::Json<Item>,
 ) -> impl Responder {
     let url = path.into_inner();
     let request = ItemRequest { 

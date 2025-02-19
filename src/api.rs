@@ -6,13 +6,16 @@ use crate::db::{Database, DbItem};
 use std::sync::Arc;
 #[cfg(feature = "ssr")]
 use tokio::sync::Mutex;
+#[cfg(feature = "ssr")]
+use crate::models::item::Item;
 
+#[cfg(feature = "ssr")]
 use serde::Deserialize;
 #[cfg(feature = "ssr")]
 #[derive(Deserialize)]
 pub struct ItemRequest {
     pub url: String,
-    pub item: DbItem,
+    pub item: Item,
 }
 
 #[cfg(feature = "ssr")]
@@ -92,7 +95,7 @@ pub async fn get_items_by_url(
 pub async fn create_item_by_url(
     db: web::Data<Arc<Mutex<Database>>>,
     url: web::Path<String>,
-    item: web::Json<DbItem>,
+    item: web::Json<Item>,
 ) -> HttpResponse {
     let db = db.lock().await;
     match db.insert_item_by_url(&url, &item.into_inner()).await {
