@@ -2,7 +2,7 @@
 use actix_web::{web, HttpResponse, Responder};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use compareware::db::{Database, DbItem};
+use compareware::db::Database;
 use compareware::api::{ItemRequest,create_item, get_items, delete_item_by_url};
 use compareware::models::item::Item;
 
@@ -14,7 +14,7 @@ async fn main() -> std::io::Result<()> {
     use leptos_actix::{generate_route_list, LeptosRoutes};
     use compareware::app::*;
     use compareware::db::Database;
-    use compareware::api::{get_items, create_item, delete_item, delete_property, delete_item_by_url, delete_property_by_url, create_item_by_url, get_items_by_url}; // Import API handlers
+    use compareware::api::{get_items, create_item, delete_item, delete_property}; // Import API handlers
     use std::sync::Arc;
     use tokio::sync::Mutex;
     

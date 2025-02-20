@@ -1,7 +1,7 @@
 #[cfg(feature = "ssr")]
 use actix_web::{web, HttpResponse};
 #[cfg(feature = "ssr")]
-use crate::db::{Database, DbItem};
+use crate::db::Database;
 #[cfg(feature = "ssr")]
 use std::sync::Arc;
 #[cfg(feature = "ssr")]

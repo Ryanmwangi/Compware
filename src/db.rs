@@ -5,7 +5,6 @@ mod db_impl {
     use std::sync::Arc;
     use tokio::sync::Mutex;
     use leptos::logging;
-    use serde_json;
     use std::collections::HashMap;
     use crate::models::item::Item;
 

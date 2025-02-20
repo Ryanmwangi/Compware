@@ -8,23 +8,12 @@ use crate::models::item::Item;
 use std::collections::HashMap;
 use std::sync::Arc;
 use wasm_bindgen::JsCast;
-use web_sys::window;
 use std::rc::Rc;
 #[derive(Deserialize, Clone, Debug)]
 struct WikidataSuggestion {
     id: String,
     label: String,
     description: Option<String>,
-}
-
-
-#[derive(Deserialize, Debug)]
-pub struct DbItem {
-    id: String,
-    name: String,
-    description: String,
-    wikidata_id: Option<String>,
-    custom_properties: String,
 }
 
 //function to load items from database
@@ -539,8 +528,6 @@ pub fn ItemsList(
                         if !value.is_empty() {
                             if let Some(wikidata_id) = &item.wikidata_id {
                                 let wikidata_id = wikidata_id.clone();
-                                let set_fetched_properties = set_fetched_properties.clone();
-                                let set_property_labels = set_property_labels.clone();
                                 spawn_local(async move {
                                     let properties = fetch_item_properties(&wikidata_id).await;
                                     log!("Fetched properties for index {}: {:?}", index, properties);
@@ -689,8 +676,6 @@ pub fn ItemsList(
 
                                                                                         // Fetch additional properties from Wikidata
                                                                                         let wikidata_id = id.clone();
-                                                                                        let set_fetched_properties = set_fetched_properties.clone();
-                                                                                        let set_property_labels = set_property_labels.clone();
                                                                                         spawn_local(async move {
                                                                                             let properties = fetch_item_properties(&wikidata_id).await;
                                                                                             // log!("Fetched properties for Wikidata ID {}: {:?}", wikidata_id, properties);
