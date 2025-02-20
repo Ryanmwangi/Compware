@@ -23,28 +23,15 @@ pub async fn load_items_from_db(current_url: &str) -> Result<Vec<Item>, String> 
         .await
         .map_err(|err| format!("Failed to fetch items: {:?}", err))?;
 
-    if response.status() == 200 {
-        // Deserialize into Vec<DbItem>
-        log!("Loading items from DB...");
-        let db_items = response
-            .json::<Vec<Item>>()
-            .await
-            .map_err(|err| format!("Failed to parse items: {:?}", err))?;
-
-        // log!("Deserialized DB items: {:?}", db_items);
-
-        // Convert DbItem to Item
-        let items = db_items.into_iter().map(|db_item| {
-            Item {
-                id: db_item.id,
-                name: db_item.name,
-                description: db_item.description,
-                wikidata_id: db_item.wikidata_id,
-                custom_properties: HashMap::new()  // Now populated from joins
-            }
-        }).collect();
-        // log!("Converted items: {:?}", items);
-        Ok(items)
+        if response.status() == 200 {
+            // Deserialize into Vec<Item>
+            log!("Loading items from DB...");
+            let items = response
+                .json::<Vec<Item>>()
+                .await
+                .map_err(|err| format!("Failed to parse items: {:?}", err))?;
+    
+            Ok(items)
     } else {
         Err(format!("Failed to fetch items: {}", response.status_text()))
     }
@@ -173,28 +160,23 @@ pub fn ItemsList(
                 .filter(|(key, _)| selected_props.contains_key(key)) // Use the extracted value
                 .collect()
         })(); 
-
-        // Serialize `custom_properties` to a JSON string
-        let custom_properties = serde_json::to_string(&custom_properties).unwrap();
     
         // Create a new struct to send to the backend
         #[derive(Serialize, Debug)]
-        struct ItemToSend {
+        struct ItemRequest {
             url: String,
-            id: String,
-            name: String,
-            description: String,
-            wikidata_id: Option<String>,
-            custom_properties: String, // JSON-encoded string
+            item: Item,
         }
     
-        let item_to_send = ItemToSend {
+        let item_to_send = ItemRequest {
             url: current_url.to_string(),
+            item: Item {
                 id: item.id,
                 name: item.name,
                 description: item.description,
                 wikidata_id: item.wikidata_id,
-            custom_properties, // Use the serialized string
+                custom_properties, // Use the filtered HashMap
+            },
         };
     
         let response = gloo_net::http::Request::post("/api/items")
