@@ -18,15 +18,16 @@ async fn main() -> std::io::Result<()> {
     use std::sync::Arc;
     use tokio::sync::Mutex;
     
-
-    // Load configuration
-    let conf = get_configuration(None).await.unwrap();
-    let addr = conf.leptos_options.site_addr;
-
     // Initialize the database
     let db = Database::new("compareware.db").unwrap();
     db.create_schema().await.unwrap(); // Ensure the schema is created
     let db = Arc::new(Mutex::new(db)); // Wrap the database in an Arc<Mutex<T>> for shared state
+    println!("Schema created successfully!");
+    
+    // Load configuration
+    let conf = get_configuration(None).await.unwrap();
+    let addr = conf.leptos_options.site_addr;
+
 
     // Generate the list of routes in your Leptos App
     let routes = generate_route_list(App);
