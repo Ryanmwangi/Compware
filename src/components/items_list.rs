@@ -84,8 +84,19 @@ pub fn ItemsList(
     // Signal to store the fetched property labels
     let (property_labels, set_property_labels) = create_signal(HashMap::<String, String>::new());
     
+    #[cfg(feature = "ssr")]
     fn get_current_url() -> String {
-        window()
+        use leptos::use_context;
+        use actix_web::HttpRequest;
+
+        use_context::<HttpRequest>()
+            .map(|req| req.uri().to_string())
+            .unwrap_or_default()
+    }
+
+    #[cfg(not(feature = "ssr"))] 
+    fn get_current_url() -> String {
+        web_sys::window()
             .and_then(|win| win.location().href().ok())
             .unwrap_or_else(|| "".to_string())
     }
@@ -190,10 +201,10 @@ pub fn ItemsList(
     
         let item_to_send = ItemToSend {
             url: current_url.to_string(),
-            id: item.id,
-            name: item.name,
-            description: item.description,
-            wikidata_id: item.wikidata_id,
+                id: item.id,
+                name: item.name,
+                description: item.description,
+                wikidata_id: item.wikidata_id,
             custom_properties, // Use the serialized string
         };
     
