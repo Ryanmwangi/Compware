@@ -36,17 +36,22 @@ mod db_impl {
                     name TEXT NOT NULL UNIQUE, 
                     global_usage_count INTEGER DEFAULT 0
                 );"
-            )?;
+            ).map_err(|e| {
+                eprintln!("Failed creating properties table: {}", e);
+                e
+            })?;
 
             // 2. URLs table
             conn.execute_batch(
                 "CREATE TABLE IF NOT EXISTS urls (
                     id INTEGER PRIMARY KEY,
-                    url TEXT NOT NULL UNIQUE,  // Enforce unique URLs
+                    url TEXT NOT NULL UNIQUE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );",
-            )?;
-            logging::log!("URLs table created or verified");
+            ).map_err(|e| {
+                eprintln!("Failed creating urls table: {}", e);
+                e
+            })?;
 
             // 3. Items table
             conn.execute_batch(
@@ -58,8 +63,10 @@ mod db_impl {
                     wikidata_id TEXT,
                     FOREIGN KEY (url_id) REFERENCES urls(id) ON DELETE CASCADE
                 );",
-            )?;
-            logging::log!("Items table updated with foreign key to URLs table");
+            ).map_err(|e| {
+                eprintln!("Failed creating items table: {}", e);
+                e
+            })?;
             
             // 4. Junction table for custom properties
             conn.execute_batch(
@@ -71,7 +78,10 @@ mod db_impl {
                     FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE,
                     FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE
                 );"
-            )?;
+            ).map_err(|e| {
+                eprintln!("Failed creating item_properties table: {}", e);
+                e
+            })?;
             Ok(())
         }
 
