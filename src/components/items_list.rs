@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use wasm_bindgen::JsCast;
 use std::rc::Rc;
+use urlencoding::encode;
 #[derive(Deserialize, Clone, Debug)]
 struct WikidataSuggestion {
     id: String,
@@ -18,7 +19,9 @@ struct WikidataSuggestion {
 
 //function to load items from database
 pub async fn load_items_from_db(current_url: &str) -> Result<Vec<Item>, String> {
-    let response = gloo_net::http::Request::get(&format!("/api/items?url={}", current_url))
+    let encoded_url = encode(&current_url);
+    let api_url = format!("/api/urls/{}/items", encoded_url);
+    let response = gloo_net::http::Request::get(&api_url)
         .send()
         .await
         .map_err(|err| format!("Failed to fetch items: {:?}", err))?;
@@ -184,8 +187,10 @@ pub fn ItemsList(
                 custom_properties, // Use the filtered HashMap
             },
         };
-        
-        let response = gloo_net::http::Request::post("/api/items")
+        let encoded_url = encode(&current_url);
+        let api_url = format!("/api/urls/{}/items", encoded_url);
+
+        let response = gloo_net::http::Request::post(&api_url)
             .json(&item_to_send)
             .unwrap()
             .send()
