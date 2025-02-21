@@ -7,6 +7,7 @@ mod db_impl {
     use leptos::logging;
     use std::collections::HashMap;
     use crate::models::item::Item;
+    use leptos::logging::log;
 
     // Define a struct to represent a database connection
     #[derive(Debug)]
@@ -207,13 +208,20 @@ mod db_impl {
             url: &str,
             item: &Item 
         ) -> Result<(), Error> {
+            // Log before DB operations
+            log!("[DATABASE] Inserting item - ID: {}, Name: '{}'", item.id, item.name);
             let conn = self.conn.lock().await;
+            
             // Get or create URL record
             let url_id = match self.get_url_id(url).await {
                 Ok(Some(id)) => id,
                 _ => self.insert_url(url).await?,
             };
-        
+
+            // Log final SQL parameters
+            log!("[DATABASE] SQL params - ID: {}, URL ID: {}, Name: '{}'", 
+            item.id, url_id, item.name);
+
             // Insert item with URL relationship
             conn.execute(
                 "INSERT INTO items (id, url_id, name, description, wikidata_id) 
@@ -231,6 +239,7 @@ mod db_impl {
                     &[&item.id, &prop_id.to_string(), &value],
                 )?;
             }
+            log!("[DATABASE] Successfully inserted item ID: {}", item.id);
             Ok(())
         }
 
@@ -260,6 +269,29 @@ mod db_impl {
             )?;
             
             logging::log!("Property deleted from the database for URL: {}", url);
+            Ok(())
+        }
+        // function to log database state
+        pub async fn debug_dump(&self) -> Result<(), Error> {
+            let conn = self.conn.lock().await;
+            log!("[DATABASE DEBUG] URLs:");
+            let mut stmt = conn.prepare("SELECT id, url FROM urls")?;
+            let urls = stmt.query_map([], |row| {
+                Ok(format!("ID: {}, URL: {}", row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })?;
+            for url in urls {
+                log!("[DATABASE DEBUG] {}", url?);
+            }
+        
+            log!("[DATABASE DEBUG] Items:");
+            let mut stmt = conn.prepare("SELECT id, name FROM items")?;
+            let items = stmt.query_map([], |row| {
+                Ok(format!("ID: {}, Name: '{}'", row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            for item in items {
+                log!("[DATABASE DEBUG] {}", item?);
+            }
+        
             Ok(())
         }
     }

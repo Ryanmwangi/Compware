@@ -8,11 +8,15 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 #[cfg(feature = "ssr")]
 use crate::models::item::Item;
+#[cfg(feature = "ssr")]
+use std::collections::HashMap;
+#[cfg(feature = "ssr")]
+use leptos::logging::log;
 
 #[cfg(feature = "ssr")]
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "ssr")]
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct ItemRequest {
     pub url: String,
     pub item: Item,
@@ -38,9 +42,27 @@ pub async fn create_item(
     db: web::Data<Arc<Mutex<Database>>>,
     request: web::Json<ItemRequest>,
 ) -> HttpResponse {
-    match db.lock().await.insert_item_by_url(&request.url, &request.item).await {
-        Ok(_) => HttpResponse::Ok().body("Item created"),
-        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+    let db = db.lock().await;
+    let url = request.url.clone();
+    let item = request.item.clone();
+    let item_id = request.item.id.clone();
+    // request logging
+    log!("[API] Received item request - URL: {}, Item ID: {}", 
+        request.url, request.item.id);
+    
+    // raw JSON logging
+    let raw_json = serde_json::to_string(&request.into_inner()).unwrap();
+    log!("[API] Raw request JSON: {}", raw_json);
+
+    match db.insert_item_by_url(&url, &item).await {
+        Ok(_) => {
+            log!("[API] Successfully saved item ID: {}", item_id);
+            HttpResponse::Ok().json(item)
+        },
+        Err(e) => {
+            log!("[API] Database error: {:?}", e); 
+            HttpResponse::BadRequest().body(format!("Database error: {}", e))
+        }
     }
 }
 
@@ -79,8 +101,9 @@ pub async fn delete_property(
 #[cfg(feature = "ssr")]
 pub async fn get_items_by_url(
     db: web::Data<Arc<Mutex<Database>>>,
-    url: web::Path<String>,
+    query: web::Query<HashMap<String, String>>,
 ) -> HttpResponse {
+    let url = query.get("url").unwrap_or(&String::new()).to_string();
     let db = db.lock().await;
     match db.get_items_by_url(&url).await {
         Ok(items) => HttpResponse::Ok().json(items),

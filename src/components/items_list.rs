@@ -33,7 +33,8 @@ pub async fn load_items_from_db(current_url: &str) -> Result<Vec<Item>, String> 
     
             Ok(items)
     } else {
-        Err(format!("Failed to fetch items: {}", response.status_text()))
+        let body = response.text().await.unwrap_or_default();
+        Err(format!("Server error ({}): {}", response.status(), body))
     }
 }
 
@@ -152,10 +153,12 @@ pub fn ItemsList(
     
     // Function to send an item to the backend API
     async fn save_item_to_db(item: Item, selected_properties: ReadSignal<HashMap<String, bool>>, current_url: String) {
+        
+        let custom_props = item.custom_properties.clone();
         // Use a reactive closure to access `selected_properties`
         let custom_properties: HashMap<String, String> = (move || {
             let selected_props = selected_properties.get(); // Access the signal inside a reactive closure
-            item.custom_properties
+            custom_props
                 .into_iter()
                 .filter(|(key, _)| selected_props.contains_key(key)) // Use the extracted value
                 .collect()
@@ -167,6 +170,9 @@ pub fn ItemsList(
             url: String,
             item: Item,
         }
+        
+        log!("[FRONTEND] Saving item - ID: {}, Name: '{}', Properties: {:?}", 
+        item.id, item.name, item.custom_properties);
     
         let item_to_send = ItemRequest {
             url: current_url.to_string(),
@@ -178,12 +184,14 @@ pub fn ItemsList(
                 custom_properties, // Use the filtered HashMap
             },
         };
-    
+        
         let response = gloo_net::http::Request::post("/api/items")
             .json(&item_to_send)
             .unwrap()
             .send()
             .await;
+
+            log!("[FRONTEND] Save response status: {:?}", response.as_ref().map(|r| r.status()));
     
         match response {
             Ok(resp) => {
