@@ -115,22 +115,6 @@ pub async fn get_items_by_url(
 }
 
 #[cfg(feature = "ssr")]
-pub async fn create_item_by_url(
-    db: web::Data<Arc<Mutex<Database>>>,
-    url: web::Path<String>,
-    item: web::Json<Item>,
-) -> HttpResponse {
-    let db = db.lock().await;
-    match db.insert_item_by_url(&url, &item.into_inner()).await {
-        Ok(_) => HttpResponse::Ok().body("Item inserted"),
-        Err(err) => {
-            leptos::logging::error!("Failed to insert item by URL: {:?}", err);
-            HttpResponse::InternalServerError().body("Failed to insert item by URL")
-        }
-    }
-}
-
-#[cfg(feature = "ssr")]
 pub async fn delete_item_by_url(
     db: web::Data<Arc<Mutex<Database>>>,
     url: web::Path<String>,

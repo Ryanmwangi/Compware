@@ -42,15 +42,15 @@ async fn main() -> std::io::Result<()> {
 
         App::new()
             .app_data(web::Data::new(db.clone()))
-            .route("/{url}/items", web::get().to(get_items_handler))
-            .route("/{url}/items", web::post().to(create_item_handler))
-            .route("/{url}/items/{item_id}", web::delete().to(delete_item_handler))
             // Register custom API routes BEFORE Leptos server functions
             .service(
                 web::scope("/api")
-                    .route("/items", web::get().to(get_items)) // GET /api/items
-                    .route("/items", web::post().to(create_item)) // POST /api/items
-                    .route("/items/{id}", web::delete().to(delete_item)) // DELETE /api/items/{id}
+                .service(
+                    web::scope("/urls/{url}")
+                        .route("/items", web::get().to(get_items_handler)) // GET items by URL
+                        .route("/items", web::post().to(create_item_handler)) // Create item for URL
+                        .route("/items/{item_id}", web::delete().to(delete_item_handler)) // Delete item
+                )
                     .route("/properties/{property}", web::delete().to(delete_property)), // DELETE /api/properties/{property}
             )
             // Register server functions
@@ -88,12 +88,11 @@ async fn get_items_handler(
 // Handler to create an item for a specific URL
 async fn create_item_handler(
     db: web::Data<Arc<Mutex<Database>>>,
-    path: web::Path<String>,
+    url: web::Path<String>,
     item: web::Json<Item>,
 ) -> impl Responder {
-    let url = path.into_inner();
     let request = ItemRequest { 
-        url, 
+        url: url.into_inner(),
         item: item.into_inner() 
     };
     create_item(db, web::Json(request)).await
