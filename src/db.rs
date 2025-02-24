@@ -132,7 +132,6 @@ mod db_impl {
         // Retrieve all items from the database for a specific URL
         pub async fn get_items_by_url(&self, url: &str) -> Result<Vec<Item>, Error> {
             let conn = self.conn.lock().await;
-
             let url_id: Option<i64> = match conn.query_row(
                 "SELECT id FROM urls WHERE url = ?",
                 &[url],
@@ -147,6 +146,9 @@ mod db_impl {
                 Some(id) => id,
                 None => return Ok(Vec::new()), // Return empty list if URL not found
             };
+
+            log!("Fetching items for URL '{}' (ID: {})", url, url_id);
+
             
             let mut stmt = conn.prepare(
                 "SELECT i.id, i.name, i.description, i.wikidata_id, 
@@ -187,15 +189,6 @@ mod db_impl {
             Ok(items.into_values().collect())
         }
 
-        async fn get_url_id(&self, url: &str) -> Result<Option<i64>, Error> {
-            let conn = self.conn.lock().await;
-            conn.query_row(
-                "SELECT id FROM urls WHERE url = ?",
-                &[url],
-                |row| row.get(0)
-            )
-        }
-
         async fn get_or_create_property(&self, prop: &str) -> Result<i64, Error> {
             let conn = self.conn.lock().await;
             // Check existing
@@ -218,43 +211,99 @@ mod db_impl {
         }
 
         // Insert a new item into the database for a specific URL
-        pub async fn insert_item_by_url(
-            &self, 
-            url: &str,
-            item: &Item 
-        ) -> Result<(), Error> {
-            // Log before DB operations
-            log!("[DATABASE] Inserting item - ID: {}, Name: '{}'", item.id, item.name);
-            let conn = self.conn.lock().await;
+        pub async fn insert_item_by_url(&self, url: &str, item: &Item) -> Result<(), Error> {
+            log!("[DB] Starting insert for URL: {}, Item: {}", url, item.id);
             
-            // Get or create URL record
-            let url_id = match self.get_url_id(url).await {
-                Ok(Some(id)) => id,
-                _ => self.insert_url(url).await?,
+            // 1. Check database lock acquisition
+            let lock_start = std::time::Instant::now();
+            let mut conn = self.conn.lock().await;
+            log!("[DB] Lock acquired in {:?}", lock_start.elapsed());
+        
+            // 2. Transaction handling
+            log!("[DB] Starting transaction");
+            let tx = conn.transaction().map_err(|e| {
+                log!("[DB] Transaction start failed: {:?}", e);
+                e
+            })?;
+        
+            // 3. URL handling
+            log!("[DB] Checking URL existence: {}", url);
+            let url_id = match tx.query_row(
+                "SELECT id FROM urls WHERE url = ?",
+                [url],
+                |row| row.get::<_, i64>(0)
+            ) {
+                Ok(id) => {
+                    log!("[DB] Found existing URL ID: {}", id);
+                    id
+                },
+                Err(rusqlite::Error::QueryReturnedNoRows) => {
+                    log!("[DB] Inserting new URL");
+                    tx.execute("INSERT INTO urls (url) VALUES (?)", [url])?;
+                    let id = tx.last_insert_rowid();
+                    log!("[DB] Created URL ID: {}", id);
+                    id
+                }
+                Err(e) => return Err(e.into()),
             };
-
-            // Log final SQL parameters
-            log!("[DATABASE] SQL params - ID: {}, URL ID: {}, Name: '{}'", 
-            item.id, url_id, item.name);
-
-            // Insert item with URL relationship
-            conn.execute(
+        
+            // 4. Item insertion
+            log!("[DB] Inserting item into items table");
+            match tx.execute(
                 "INSERT INTO items (id, url_id, name, description, wikidata_id) 
                 VALUES (?, ?, ?, ?, ?)",
-                &[&item.id, &url_id.to_string(), &item.name, 
-                &item.description, &item.wikidata_id.as_ref().unwrap_or(&String::new())],
-            )?;
-
-            // Handle properties through junction table
+                rusqlite::params![
+                    &item.id,
+                    url_id,
+                    &item.name,
+                    &item.description,
+                    &item.wikidata_id
+                ],
+            ) {
+                Ok(_) => log!("[DB] Item inserted successfully"),
+                Err(e) => {
+                    log!("[DB] Item insert error: {:?}", e);
+                    return Err(e.into());
+                }
+            }
+            // Property handling with enhanced logging
+            log!("[DB] Processing {} properties", item.custom_properties.len());
             for (prop, value) in &item.custom_properties {
-                let prop_id = self.get_or_create_property(&prop).await?;
-                conn.execute(
+                log!("[DB] Handling property: {}", prop);
+
+                // Property Lookup/Creation
+                let prop_id = match tx.query_row(
+                    "SELECT id FROM properties WHERE name = ?",
+                    [prop],
+                    |row| row.get::<_, i64>(0)
+                ) {
+                    Ok(id) => {
+                        log!("[DB] Existing property ID: {}", id);
+                        id
+                    },
+                    Err(rusqlite::Error::QueryReturnedNoRows) => {
+                        log!("[DB] Creating new property: {}", prop);
+                        tx.execute("INSERT INTO properties (name) VALUES (?)", [prop])?;
+                        let id = tx.last_insert_rowid();
+                        log!("[DB] New property ID: {}", id);
+                        id
+                    }
+                    Err(e) => {
+                        log!("[DB] Property lookup error: {:?}", e);
+                        return Err(e.into());
+                    }
+                };
+                // Property Value Insertion
+                log!("[DB] Inserting property {} with value {}", prop, value);
+                tx.execute(
                     "INSERT INTO item_properties (item_id, property_id, value)
                     VALUES (?, ?, ?)",
-                    &[&item.id, &prop_id.to_string(), &value],
+                    rusqlite::params![&item.id, prop_id, &value],
                 )?;
             }
-            log!("[DATABASE] Successfully inserted item ID: {}", item.id);
+        
+            tx.commit()?;
+            log!("[DB] Transaction committed successfully");
             Ok(())
         }
 
@@ -280,7 +329,10 @@ mod db_impl {
                  ) AND item_id IN (
                      SELECT id FROM items WHERE url_id = ?
                  )",
-                &[property, &url_id.to_string()],
+                 rusqlite::params![
+                     property,  // &str
+                     url_id     // i64
+                 ],
             )?;
             
             logging::log!("Property deleted from the database for URL: {}", url);
