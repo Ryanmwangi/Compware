@@ -19,24 +19,47 @@ struct WikidataSuggestion {
 
 //function to load items from database
 pub async fn load_items_from_db(current_url: &str) -> Result<Vec<Item>, String> {
+    //logging for the raw URL
+    log!("[DEBUG] Loading items for URL: {}", current_url);
+
     let encoded_url = encode(&current_url);
     let api_url = format!("/api/urls/{}/items", encoded_url);
+
+    // Log the constructed API URL
+    log!("[DEBUG] Making request to API endpoint: {}", api_url);
+
     let response = gloo_net::http::Request::get(&api_url)
         .send()
         .await
-        .map_err(|err| format!("Failed to fetch items: {:?}", err))?;
-
-        if response.status() == 200 {
-            // Deserialize into Vec<Item>
-            log!("Loading items from DB...");
-            let items = response
-                .json::<Vec<Item>>()
-                .await
-                .map_err(|err| format!("Failed to parse items: {:?}", err))?;
-    
-            Ok(items)
+        .map_err(|err| {
+            log!("[ERROR] Network error: {:?}", err);
+            format!("Failed to fetch items: {:?}", err)
+        })?;
+    // Log response metadata
+    log!("[DEBUG] Received response - Status: {}", response.status());
+    if response.status() == 200 {
+        log!("[DEBUG] Successfully received items");
+        let items = response
+            .json::<Vec<Item>>()
+            .await
+            .map_err(|err| {
+                log!("[ERROR] JSON parsing error: {:?}", err);
+                format!("Failed to parse items: {:?}", err)
+            })?;
+            log!("[DEBUG] Successfully parsed {} items", items.len());
+        Ok(items)
     } else {
         let body = response.text().await.unwrap_or_default();
+        log!("[ERROR] Server error details:
+            Status: {}
+            URL: {}
+            Response Body: {}
+            Request URL: {}", 
+            response.status(),
+            api_url,
+            body,
+            current_url
+        );
         Err(format!("Server error ({}): {}", response.status(), body))
     }
 }
