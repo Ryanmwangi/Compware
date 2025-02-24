@@ -132,7 +132,22 @@ mod db_impl {
         // Retrieve all items from the database for a specific URL
         pub async fn get_items_by_url(&self, url: &str) -> Result<Vec<Item>, Error> {
             let conn = self.conn.lock().await;
-            let url_id: i64  = conn.query_row("SELECT id FROM urls WHERE url = ?", &[url], |row| row.get(0))?;
+
+            let url_id: Option<i64> = match conn.query_row(
+                "SELECT id FROM urls WHERE url = ?",
+                &[url],
+                |row| row.get(0)
+            ) {
+                Ok(id) => Some(id),
+                Err(rusqlite::Error::QueryReturnedNoRows) => None,
+                Err(e) => return Err(e),
+            };
+        
+            let url_id = match url_id {
+                Some(id) => id,
+                None => return Ok(Vec::new()), // Return empty list if URL not found
+            };
+            
             let mut stmt = conn.prepare(
                 "SELECT i.id, i.name, i.description, i.wikidata_id, 
                         p.name AS prop_name, ip.value
