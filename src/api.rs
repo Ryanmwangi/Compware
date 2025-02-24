@@ -27,11 +27,16 @@ pub async fn get_items(
     db: web::Data<Arc<Mutex<Database>>>,
     url: web::Query<String>,
 ) -> HttpResponse {
+    log!("[SERVER] Received request for URL: {}", url);
+
     let db = db.lock().await;
     match db.get_items_by_url(&url).await {
-        Ok(items) => HttpResponse::Ok().json(items),
+        Ok(items) => {
+            log!("[SERVER] Returning {} items for URL: {}", items.len(), url);
+            HttpResponse::Ok().json(items)
+        },
         Err(err) => {
-            leptos::logging::error!("Failed to fetch items: {:?}", err);
+            log!("[SERVER ERROR] Failed to fetch items for {}: {:?}", url, err);
             HttpResponse::InternalServerError().body("Failed to fetch items")
         }
     }
