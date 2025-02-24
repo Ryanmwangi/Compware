@@ -82,7 +82,10 @@ async fn get_items_handler(
     db: web::Data<Arc<Mutex<Database>>>,
     url: web::Path<String>,
 ) -> impl Responder {
-    get_items(db, web::Query(url.into_inner())).await
+    let decoded_url = urlencoding::decode(&url)
+        .map(|cow| cow.into_owned())
+        .unwrap_or_default();
+    get_items(db, web::Query(decoded_url)).await
 }
 
 // Handler to create an item for a specific URL
