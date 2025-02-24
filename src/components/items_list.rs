@@ -177,21 +177,11 @@ pub fn ItemsList(
         log!("[FRONTEND] Saving item - ID: {}, Name: '{}', Properties: {:?}", 
         item.id, item.name, item.custom_properties);
     
-        let item_to_send = ItemRequest {
-            url: current_url.to_string(),
-            item: Item {
-                id: item.id,
-                name: item.name,
-                description: item.description,
-                wikidata_id: item.wikidata_id,
-                custom_properties, // Use the filtered HashMap
-            },
-        };
         let encoded_url = encode(&current_url);
         let api_url = format!("/api/urls/{}/items", encoded_url);
 
         let response = gloo_net::http::Request::post(&api_url)
-            .json(&item_to_send)
+            .json(&item)
             .unwrap()
             .send()
             .await;
