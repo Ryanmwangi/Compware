@@ -248,10 +248,15 @@ mod db_impl {
             };
         
             // 4. Item insertion
-            log!("[DB] Inserting item into items table");
-            match tx.execute(
-                "INSERT INTO items (id, url_id, name, description, wikidata_id) 
-                VALUES (?, ?, ?, ?, ?)",
+            log!("[DB] Upserting item");
+            tx.execute(
+                "INSERT INTO items (id, url_id, name, description, wikidata_id)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    url_id = excluded.url_id,
+                    name = excluded.name,
+                    description = excluded.description,
+                    wikidata_id = excluded.wikidata_id",
                 rusqlite::params![
                     &item.id,
                     url_id,
@@ -259,13 +264,8 @@ mod db_impl {
                     &item.description,
                     &item.wikidata_id
                 ],
-            ) {
-                Ok(_) => log!("[DB] Item inserted successfully"),
-                Err(e) => {
-                    log!("[DB] Item insert error: {:?}", e);
-                    return Err(e.into());
-                }
-            }
+            )?;
+            log!("[DB] Item upserted successfully");
             // Property handling with enhanced logging
             log!("[DB] Processing {} properties", item.custom_properties.len());
             for (prop, value) in &item.custom_properties {
