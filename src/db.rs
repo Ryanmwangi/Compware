@@ -67,8 +67,22 @@ mod db_impl {
                 eprintln!("Failed creating items table: {}", e);
                 e
             })?;
+
+            // 4. Table for selected properties
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS selected_properties (
+                    url_id INTEGER NOT NULL,
+                    property_id INTEGER NOT NULL,
+                    PRIMARY KEY (url_id, property_id),
+                    FOREIGN KEY (url_id) REFERENCES urls(id) ON DELETE CASCADE,
+                    FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE
+                );"
+            ).map_err(|e| {
+                eprintln!("Failed creating properties table: {}", e);
+                e
+            })?;
             
-            // 4. Junction table for custom properties
+            // 5. Junction table for custom properties
             conn.execute_batch(
                 "CREATE TABLE IF NOT EXISTS item_properties (
                     item_id TEXT NOT NULL,
@@ -372,6 +386,54 @@ mod db_impl {
         
             tx.commit()?;
             Ok(())
+        }
+
+        pub async fn add_selected_property(&self, url: &str, property: &str) -> Result<(), Error> {
+            let mut conn = self.conn.lock().await;
+            let tx = conn.transaction()?;
+            
+            // Get URL ID
+            let url_id = tx.query_row(
+                "SELECT id FROM urls WHERE url = ?",
+                [url],
+                |row| row.get::<_, i64>(0)
+            )?;
+        
+            // Get/Create property
+            let prop_id = match tx.query_row(
+                "SELECT id FROM properties WHERE name = ?",
+                [property],
+                |row| row.get::<_, i64>(0)
+            ) {
+                Ok(id) => id,
+                Err(_) => {
+                    tx.execute("INSERT INTO properties (name) VALUES (?)", [property])?;
+                    tx.last_insert_rowid()
+                }
+            };
+        
+            // Insert into selected_properties
+            tx.execute(
+                "INSERT OR IGNORE INTO selected_properties (url_id, property_id) VALUES (?, ?)",
+                [url_id, prop_id]
+            )?;
+        
+            tx.commit()?;
+            Ok(())
+        }
+
+        pub async fn get_selected_properties(&self, url: &str) -> Result<Vec<String>, Error> {
+            let conn = self.conn.lock().await;
+            let mut stmt = conn.prepare(
+                "SELECT p.name 
+                 FROM selected_properties sp
+                 JOIN properties p ON sp.property_id = p.id
+                 JOIN urls u ON sp.url_id = u.id
+                 WHERE u.url = ?"
+            )?;
+            
+            let properties = stmt.query_map([url], |row| row.get(0))?;
+            properties.collect()
         }
         
         // function to log database state

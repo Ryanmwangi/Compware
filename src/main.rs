@@ -3,7 +3,7 @@ use actix_web::{web, HttpResponse, Responder};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use compareware::db::Database;
-use compareware::api::{ItemRequest,create_item, get_items, delete_item_by_url};
+use compareware::api::{ItemRequest,create_item, get_items, get_selected_properties, add_selected_property};
 use compareware::models::item::Item;
 
 #[actix_web::main]
@@ -14,7 +14,7 @@ async fn main() -> std::io::Result<()> {
     use leptos_actix::{generate_route_list, LeptosRoutes};
     use compareware::app::*;
     use compareware::db::Database;
-    use compareware::api::{get_items, create_item, delete_item, delete_property}; // Import API handlers
+    use compareware::api::{delete_item, delete_property}; // Import API handlers
     use std::sync::Arc;
     use tokio::sync::Mutex;
     
@@ -50,6 +50,8 @@ async fn main() -> std::io::Result<()> {
                         .route("/items", web::get().to(get_items_handler)) // GET items by URL
                         .route("/items", web::post().to(create_item_handler)) // Create item for URL
                         .route("/items/{item_id}", web::delete().to(delete_item)) // Delete item for URL
+                        .route("/properties", web::get().to(get_selected_properties_handler))
+                        .route("/properties", web::post().to(add_selected_property_handler))
                         .route("/properties/{property}", web::delete().to(delete_property)) // Delete property for URL
                 )
             )
@@ -98,13 +100,30 @@ async fn create_item_handler(
     create_item(db, web::Json(request)).await
 }
 
-// Handler to delete an item for a specific URL
-async fn delete_item_handler(
+// // Handler to delete an item for a specific URL
+// async fn delete_item_handler(
+//     db: web::Data<Arc<Mutex<Database>>>,
+//     path: web::Path<(String, String)>,
+// ) -> impl Responder {
+//     let (url, item_id) = path.into_inner();
+//     delete_item_by_url(db, web::Path::from(url), web::Path::from(item_id)).await
+// }
+
+#[cfg(feature = "ssr")]
+async fn get_selected_properties_handler(
     db: web::Data<Arc<Mutex<Database>>>,
-    path: web::Path<(String, String)>,
+    url: web::Path<String>,
 ) -> impl Responder {
-    let (url, item_id) = path.into_inner();
-    delete_item_by_url(db, web::Path::from(url), web::Path::from(item_id)).await
+    get_selected_properties(db, url).await
+}
+
+#[cfg(feature = "ssr")]
+async fn add_selected_property_handler(
+    db: web::Data<Arc<Mutex<Database>>>,
+    url: web::Path<String>,
+    property: web::Json<String>,
+) -> impl Responder {
+    add_selected_property(db, url, property).await
 }
 #[cfg(feature = "ssr")]
 // Define the index handler

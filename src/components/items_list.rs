@@ -47,7 +47,60 @@ pub async fn load_items_from_db(current_url: &str) -> Result<Vec<Item>, String> 
                 format!("Failed to parse items: {:?}", err)
             })?;
             log!("[DEBUG] Successfully parsed {} items", items.len());
-        Ok(items)
+
+        // Get the selected properties for the current URL
+        let selected_properties_response = gloo_net::http::Request::get(
+            &format!("/api/urls/{}/properties", encoded_url)
+        )
+        .send()
+        .await
+        .map_err(|err| {
+            log!("[ERROR] Network error: {:?}", err);
+            format!("Failed to fetch selected properties: {:?}", err)
+        })?;
+        if selected_properties_response.status() == 200 {
+            let selected_properties: Vec<String> = selected_properties_response
+                .json()
+                .await
+                .map_err(|err| {
+                    log!("[ERROR] JSON parsing error: {:?}", err);
+                    format!("Failed to parse selected properties: {:?}", err)
+                })?;
+            log!("[DEBUG] Successfully received selected properties");
+
+            // Filter the items to only include the selected properties
+            let filtered_items = items
+                .into_iter()
+                .map(|item| {
+                    let filtered_custom_properties = item
+                        .custom_properties
+                        .into_iter()
+                        .filter(|(key, _)| selected_properties.contains(key))
+                        .collect();
+                    Item {
+                        id: item.id,
+                        name: item.name,
+                        description: item.description,
+                        wikidata_id: item.wikidata_id,
+                        custom_properties: filtered_custom_properties,
+                    }
+                })
+                .collect();
+            Ok(filtered_items)
+        } else {
+            let body = selected_properties_response.text().await.unwrap_or_default();
+            log!("[ERROR] Server error details:
+                Status: {}
+                URL: {}
+                Response Body: {}
+                Request URL: {}", 
+                selected_properties_response.status(),
+                api_url,
+                body,
+                current_url
+            );
+            Err(format!("Server error ({}): {}", selected_properties_response.status(), body))
+        }
     } else {
         let body = response.text().await.unwrap_or_default();
         log!("[ERROR] Server error details:
@@ -465,7 +518,44 @@ pub fn ItemsList(
         Arc::new(move |property: String| {
         // Normalize the property ID
         let normalized_property = property.replace("http://www.wikidata.org/prop/", "");
-        
+        let normalized_property_clone = normalized_property.clone();
+
+        // Check if property is already selected
+        if !selected_properties.get().contains_key(&normalized_property) && !normalized_property.is_empty() {
+            // Add property to selected properties
+            set_selected_properties.update(|selected| {
+                selected.insert(normalized_property.clone(), true);
+            });
+
+            // Save the selected property to the database
+            spawn_local({
+                let current_url = Rc::clone(&current_url);
+                let normalized_property = normalized_property_clone.clone();
+                async move {
+                    let response = gloo_net::http::Request::post(
+                        &format!("/api/urls/{}/properties", encode(&current_url))
+                    )
+                    .json(&normalized_property)
+                    .unwrap()
+                    .send()
+                    .await;
+                    
+                    match response {
+                        Ok(resp) => {
+                            if resp.status() == 200 {
+                                log!("Property saved successfully");
+                            } else {
+                                log!("Error saving property: {}", resp.status_text());
+                            }
+                        }
+                        Err(err) => {
+                            log!("Error saving property: {:?}", err);
+                        }
+                    }
+                }
+            });
+        }
+
         set_custom_properties.update(|props| {
             if !props.contains(&normalized_property) && !normalized_property.is_empty() {
                 props.push(normalized_property.clone());

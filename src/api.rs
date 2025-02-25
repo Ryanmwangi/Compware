@@ -152,3 +152,31 @@ pub async fn delete_property_by_url(
         }
     }
 }
+
+#[cfg(feature = "ssr")]
+pub async fn get_selected_properties(
+    db: web::Data<Arc<Mutex<Database>>>,
+    url: web::Path<String>,
+) -> HttpResponse {
+    let db = db.lock().await;
+    match db.get_selected_properties(&url).await {
+        Ok(properties) => HttpResponse::Ok().json(properties),
+        Err(e) => HttpResponse::InternalServerError().body(e.to_string())
+    }
+}
+
+#[cfg(feature = "ssr")]
+pub async fn add_selected_property(
+    db: web::Data<Arc<Mutex<Database>>>,
+    url: web::Path<String>,
+    property: web::Json<String>,
+) -> HttpResponse {
+    let url = url.into_inner();
+    let property = property.into_inner();
+    
+    let db = db.lock().await;
+    match db.add_selected_property(&url, &property).await {
+        Ok(_) => HttpResponse::Ok().finish(),
+        Err(e) => HttpResponse::InternalServerError().body(e.to_string())
+    }
+}
