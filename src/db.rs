@@ -274,7 +274,7 @@ mod db_impl {
                     JOIN properties p ON ip.property_id = p.id
                     WHERE ip.item_id = ?"
                 )?;
-                
+
                 let mapped_rows = stmt.query_map([&item.id], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                 })?;
@@ -326,35 +326,54 @@ mod db_impl {
 
         // Delete an item from the database for a specific URL
         pub async fn delete_item_by_url(&self, url: &str, item_id: &str) -> Result<(), Error> {
-            let conn = self.conn.lock().await;
-            let url_id: i64 = conn.query_row("SELECT id FROM urls WHERE url = ?", &[url], |row| row.get(0))?;
-            conn.execute("DELETE FROM items WHERE id = ? AND url_id = ?", &[item_id, &url_id.to_string()])?;
-            logging::log!("Item deleted from the database for URL: {}", url);
+            let mut conn = self.conn.lock().await;
+            let tx = conn.transaction()?;
+
+            // Get URL ID
+            let url_id: i64 = tx.query_row(
+                "SELECT id FROM urls WHERE url = ?",
+                [url],
+                |row| row.get(0)
+            )?;
+        
+            // Delete item and properties
+            tx.execute(
+                "DELETE FROM items WHERE id = ? AND url_id = ?",
+                [item_id, &url_id.to_string()],
+            )?;
+        
+            tx.commit()?;
             Ok(())
         }
 
         // Delete a property from the database for a specific URL
         pub async fn delete_property_by_url(&self, url: &str, property: &str) -> Result<(), Error> {
-            let conn = self.conn.lock().await;
-            let url_id: i64 = conn.query_row("SELECT id FROM urls WHERE url = ?", &[url], |row| row.get(0))?;
+            let mut conn = self.conn.lock().await;
+            let tx = conn.transaction()?;
             
-            // Delete from junction table instead of JSON
-            conn.execute(
-                "DELETE FROM item_properties 
-                 WHERE property_id IN (
-                     SELECT id FROM properties WHERE name = ?
-                 ) AND item_id IN (
-                     SELECT id FROM items WHERE url_id = ?
-                 )",
-                 rusqlite::params![
-                     property,  // &str
-                     url_id     // i64
-                 ],
+            // Get URL ID
+            let url_id: i64 = tx.query_row(
+                "SELECT id FROM urls WHERE url = ?",
+                [url],
+                |row| row.get(0)
             )?;
-            
-            logging::log!("Property deleted from the database for URL: {}", url);
+        
+            // Delete property from all items in this URL
+            tx.execute(
+                "DELETE FROM item_properties 
+                WHERE property_id IN (
+                    SELECT id FROM properties WHERE name = ?
+                )
+                AND item_id IN (
+                    SELECT id FROM items WHERE url_id = ?
+                )",
+                [property, &url_id.to_string()],
+            )?;
+        
+            tx.commit()?;
             Ok(())
         }
+        
         // function to log database state
         pub async fn debug_dump(&self) -> Result<(), Error> {
             let conn = self.conn.lock().await;

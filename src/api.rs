@@ -74,15 +74,16 @@ pub async fn create_item(
 #[cfg(feature = "ssr")]
 pub async fn delete_item(
     db: web::Data<Arc<Mutex<Database>>>,
-    url: web::Query<String>,
-    item_id: web::Path<String>,
+    path: web::Path<(String, String)>, // (url, item_id)
 ) -> HttpResponse {
+    let (url, item_id) = path.into_inner();
+    log!("[API] Deleting item {} from URL {}", item_id, url);
     let db = db.lock().await;
     match db.delete_item_by_url(&url, &item_id).await {
-        Ok(_) => HttpResponse::Ok().body("Item deleted"),
-        Err(err) => {
-            leptos::logging::error!("Failed to delete item: {:?}", err);
-            HttpResponse::InternalServerError().body("Failed to delete item")
+        Ok(_) => HttpResponse::Ok().finish(),
+        Err(e) => {
+            log!("[API] Delete error: {:?}", e);
+            HttpResponse::InternalServerError().body(e.to_string())
         }
     }
 }
@@ -90,15 +91,16 @@ pub async fn delete_item(
 #[cfg(feature = "ssr")]
 pub async fn delete_property(
     db: web::Data<Arc<Mutex<Database>>>,
-    url: web::Query<String>,
-    property: web::Path<String>,
+    path: web::Path<(String, String)>, // (url, property)
 ) -> HttpResponse {
+    let (url, property) = path.into_inner();
+    log!("[API] Deleting property {} from URL {}", property, url);
     let db = db.lock().await;
     match db.delete_property_by_url(&url, &property).await {
-        Ok(_) => HttpResponse::Ok().body("Property deleted"),
-        Err(err) => {
-            leptos::logging::error!("Failed to delete property: {:?}", err);
-            HttpResponse::InternalServerError().body("Failed to delete property")
+        Ok(_) => HttpResponse::Ok().finish(),
+        Err(e) => {
+            log!("[API] Delete error: {:?}", e);
+            HttpResponse::InternalServerError().body(e.to_string())
         }
     }
 }

@@ -49,9 +49,9 @@ async fn main() -> std::io::Result<()> {
                     web::scope("/urls/{url}")
                         .route("/items", web::get().to(get_items_handler)) // GET items by URL
                         .route("/items", web::post().to(create_item_handler)) // Create item for URL
-                        .route("/items/{item_id}", web::delete().to(delete_item_handler)) // Delete item
+                        .route("/items/{item_id}", web::delete().to(delete_item)) // Delete item for URL
+                        .route("/properties/{property}", web::delete().to(delete_property)) // Delete property for URL
                 )
-                    .route("/properties/{property}", web::delete().to(delete_property)), // DELETE /api/properties/{property}
             )
             // Register server functions
             .route("/api/{tail:.*}", leptos_actix::handle_server_fns())

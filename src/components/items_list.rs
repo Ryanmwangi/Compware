@@ -223,57 +223,75 @@ pub fn ItemsList(
         }
     }
 
+    let current_url_for_remove_item = Rc::clone(&current_url);
     // Function to remove an item
-    let remove_item = move |index: usize| {
-        let item_id = items.get()[index].id.clone();
-        spawn_local(async move {
-            let response = gloo_net::http::Request::delete(&format!("/api/items/{}", item_id))
+    let remove_item = {
+        let set_items = set_items.clone();
+        move |index: usize| {
+            let item_id = items.get()[index].id.clone();
+            let current_url = Rc::clone(&current_url_for_remove_item);
+            spawn_local(async move {
+                let response = gloo_net::http::Request::delete(
+                    &format!("/api/urls/{}/items/{}", encode(&current_url), item_id)
+                )
                 .send()
                 .await;
-            match response {
-                Ok(resp) => {
-                    if resp.status() == 200 {
-                        set_items.update(|items| {
-                            items.remove(index);
-                        });
-                        log!("Item deleted: {}", item_id);
-                    } else {
-                        log!("Failed to delete item: {}", resp.status_text());
+                
+                match response {
+                    Ok(resp) => {
+                        if resp.status() == 200 {
+                            set_items.update(|items| {
+                                items.remove(index);
+                            });
+                            log!("Item deleted: {}", item_id);
+                        } else {
+                            log!("Failed to delete item: {}", resp.status_text());
+                        }
                     }
+                    Err(err) => log!("Failed to delete item: {:?}", err),
                 }
-                Err(err) => log!("Failed to delete item: {:?}", err),
-            }
-        });
+            });
+        }
     };
 
+    let current_url_for_remove_property = Rc::clone(&current_url);
     // Function to remove a property
-    let remove_property = move |property: String| {
-        spawn_local(async move {
-            let response = gloo_net::http::Request::delete(&format!("/api/properties/{}", property))
+    let remove_property = {
+        let set_custom_properties = set_custom_properties.clone();
+        let set_selected_properties = set_selected_properties.clone();
+        let set_items = set_items.clone();
+        move |property: String| {
+            let current_url = Rc::clone(&current_url_for_remove_property);
+            spawn_local(async move {
+                let response = gloo_net::http::Request::delete(
+                    &format!("/api/urls/{}/properties/{}", encode(&current_url), property)
+                )
                 .send()
                 .await;
-            match response {
-                Ok(resp) => {
-                    if resp.status() == 200 {
-                        set_custom_properties.update(|props| {
-                            props.retain(|p| p != &property);
-                        });
-                        set_selected_properties.update(|selected| {
-                            selected.remove(&property);
-                        });
-                        set_items.update(|items| {
-                            for item in items {
-                                item.custom_properties.remove(&property);
-                            }
-                        });
-                        log!("Property deleted: {}", property);
-                    } else {
-                        log!("Failed to delete property: {}", resp.status_text());
+    
+                match response {
+                    Ok(resp) => {
+                        if resp.status() == 200 {
+                            set_custom_properties.update(|props| {
+                                props.retain(|p| p != &property);
+                            });
+                            set_selected_properties.update(|selected| {
+                                selected.remove(&property);
+                            });
+                            set_items.update(|items| {
+                                for item in items {
+                                    item.custom_properties.remove(&property);
+                                }
+                            });
+                            log!("Property deleted: {}", property);
+                        } else {
+                            log!("Failed to delete property: {}", resp.status_text());
+                        }
                     }
+                    Err(err) => log!("Failed to delete property: {:?}", err),
                 }
-                Err(err) => log!("Failed to delete property: {:?}", err),
-            }
-        });
+            });
+        }
     };
 
     // State to store Wikidata suggestions
@@ -596,9 +614,10 @@ pub fn ItemsList(
                     <tr>
                         <th>{ "Property" }</th>
                         {move || items.get().iter().enumerate().map(|(index, item)| {
+                            let remove_item = remove_item.clone();
                             view! {
                                 <th>
-                                    { item.name.clone() }
+                                    {item.name.clone()}
                                     <button on:click=move |_| remove_item(index)>{ "Delete" }</button>
                                 </th>
                             }
@@ -753,7 +772,9 @@ pub fn ItemsList(
                         move || {
                         let update_item = Arc::clone(&update_item_outer);
                         let custom_props = custom_properties.get().clone();
+                        let remove_property = remove_property.clone();
                         custom_props.into_iter().map(move |property| {
+                            let remove_property_clone = remove_property.clone();
                             let update_item_inner = Arc::clone(&update_item);
                             let normalized_property = property.replace("http://www.wikidata.org/prop/", "");
                             let property_label = property_labels.get().get(&normalized_property).cloned().unwrap_or_else(|| normalized_property.clone());
@@ -765,7 +786,7 @@ pub fn ItemsList(
                                         { property_label }
                                         <button class="delete-property" on:click=move |_| {
                                             log!("Deleting property: {}", property_clone_for_button);
-                                            remove_property(property_clone_for_button.clone());
+                                            remove_property_clone(property_clone_for_button.clone());
                                             set_custom_properties.update(|props| {
                                                 props.retain(|p| p != &property_clone_for_button);
                                             });
