@@ -4,10 +4,10 @@ use leptos_router::*;
 use leptos::logging::log;
 use crate::components::items_list::{ItemsList, load_items_from_db};
 use crate::models::item::Item;
-use crate::nostr::NostrClient;
-use tokio::sync::mpsc;
 use leptos::spawn_local;
-use nostr_sdk::serde_json;
+// use tokio::sync::mpsc;
+// use crate::nostr::NostrClient;
+// use nostr_sdk::serde_json;
 
 #[component]
 pub fn App() -> impl IntoView {
@@ -15,19 +15,19 @@ pub fn App() -> impl IntoView {
 
     // Signal to manage the list of items
     let (items_signal, set_items) = create_signal(Vec::<Item>::new());
-    let (tx, mut rx) = mpsc::channel::<String>(100);
+    // let (tx, mut rx) = mpsc::channel::<String>(100);
 
-    // Nostr client subscription for items
-    spawn_local(async move {
-        let nostr_client = NostrClient::new("wss://relay.example.com").await.unwrap();
-        nostr_client.subscribe_to_items(tx.clone()).await.unwrap();
+    // // Nostr client subscription for items
+    // spawn_local(async move {
+    //     let nostr_client = NostrClient::new("wss://relay.example.com").await.unwrap();
+    //     nostr_client.subscribe_to_items(tx.clone()).await.unwrap();
 
-        while let Some(content) = rx.recv().await {
-            if let Ok(item) = serde_json::from_str::<Item>(&content) {
-                set_items.update(|items| items.push(item));
-            }
-        }
-    });
+    //     while let Some(content) = rx.recv().await {
+    //         if let Ok(item) = serde_json::from_str::<Item>(&content) {
+    //             set_items.update(|items| items.push(item));
+    //         }
+    //     }
+    // });
     view! {
         <Router>
             <Routes>
