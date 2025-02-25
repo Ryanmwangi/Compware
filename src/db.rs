@@ -5,7 +5,7 @@ mod db_impl {
     use std::sync::Arc;
     use tokio::sync::Mutex;
     use leptos::logging;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use crate::models::item::Item;
     use leptos::logging::log;
 
@@ -189,24 +189,22 @@ mod db_impl {
             Ok(items.into_values().collect())
         }
 
-        async fn get_or_create_property(&self, prop: &str) -> Result<i64, Error> {
-            let conn = self.conn.lock().await;
-            // Check existing
-            let exists: Result<i64, _> = conn.query_row(
+        async fn get_or_create_property(
+            &self, 
+            tx: &mut rusqlite::Transaction<'_>, 
+            prop: &str
+        ) -> Result<i64, Error> {
+            match tx.query_row(
                 "SELECT id FROM properties WHERE name = ?",
-                &[prop],
-                |row| row.get(0)
-            );
-            
-            match exists {
+                [prop],
+                |row| row.get::<_, i64>(0)
+            ) {
                 Ok(id) => Ok(id),
-                Err(_) => {
-                    conn.execute(
-                        "INSERT INTO properties (name) VALUES (?)",
-                        &[prop],
-                    )?;
-                    Ok(conn.last_insert_rowid())
+                Err(rusqlite::Error::QueryReturnedNoRows) => {
+                    tx.execute("INSERT INTO properties (name) VALUES (?)", [prop])?;
+                    Ok(tx.last_insert_rowid())
                 }
+                Err(e) => Err(e.into()),
             }
         }
 
@@ -221,7 +219,7 @@ mod db_impl {
         
             // 2. Transaction handling
             log!("[DB] Starting transaction");
-            let tx = conn.transaction().map_err(|e| {
+            let mut tx = conn.transaction().map_err(|e| {
                 log!("[DB] Transaction start failed: {:?}", e);
                 e
             })?;
@@ -267,41 +265,60 @@ mod db_impl {
             )?;
             log!("[DB] Item upserted successfully");
             // Property handling with enhanced logging
-            log!("[DB] Processing {} properties", item.custom_properties.len());
-            for (prop, value) in &item.custom_properties {
-                log!("[DB] Handling property: {}", prop);
-
-                // Property Lookup/Creation
-                let prop_id = match tx.query_row(
-                    "SELECT id FROM properties WHERE name = ?",
-                    [prop],
-                    |row| row.get::<_, i64>(0)
-                ) {
-                    Ok(id) => {
-                        log!("[DB] Existing property ID: {}", id);
-                        id
-                    },
-                    Err(rusqlite::Error::QueryReturnedNoRows) => {
-                        log!("[DB] Creating new property: {}", prop);
-                        tx.execute("INSERT INTO properties (name) VALUES (?)", [prop])?;
-                        let id = tx.last_insert_rowid();
-                        log!("[DB] New property ID: {}", id);
-                        id
-                    }
-                    Err(e) => {
-                        log!("[DB] Property lookup error: {:?}", e);
-                        return Err(e.into());
-                    }
-                };
-                // Property Value Insertion
-                log!("[DB] Inserting property {} with value {}", prop, value);
-                tx.execute(
-                    "INSERT INTO item_properties (item_id, property_id, value)
-                    VALUES (?, ?, ?)",
-                    rusqlite::params![&item.id, prop_id, &value],
+            log!("[DB] Synchronizing properties for item {}", item.id);
+            let existing_props = {
+                // Prepare statement and collect existing properties
+                let mut stmt = tx.prepare(
+                    "SELECT p.name, ip.value 
+                    FROM item_properties ip
+                    JOIN properties p ON ip.property_id = p.id
+                    WHERE ip.item_id = ?"
                 )?;
-            }
+                
+                let mapped_rows = stmt.query_map([&item.id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?;
+
+                mapped_rows.collect::<Result<HashMap<String, String>, _>>()?
+            };
         
+            for (prop, value) in &item.custom_properties {
+                // Update existing or insert new
+                let prop_id = self.get_or_create_property(&mut tx, prop).await?;
+                if let Some(existing_value) = existing_props.get(prop) {
+                    if existing_value != value {
+                        log!("[DB] Updating property {} from '{}' to '{}'", prop, existing_value, value);
+                        tx.execute(
+                            "UPDATE item_properties 
+                            SET value = ? 
+                            WHERE item_id = ? 
+                            AND property_id = (SELECT id FROM properties WHERE name = ?)",
+                            rusqlite::params![value, &item.id, prop],
+                        )?;
+                    }
+                } else {
+                    log!("[DB] Adding new property {}", prop);
+                    tx.execute(
+                        "INSERT INTO item_properties (item_id, property_id, value)
+                        VALUES (?, ?, ?)",
+                        rusqlite::params![&item.id, prop_id, value],
+                    )?;
+                }
+            }
+
+            // Remove deleted properties
+            let current_props: HashSet<&str> = item.custom_properties.keys().map(|s| s.as_str()).collect();
+            for (existing_prop, _) in existing_props {
+                if !current_props.contains(existing_prop.as_str()) {
+                    log!("[DB] Removing deleted property {}", existing_prop);
+                    tx.execute(
+                        "DELETE FROM item_properties 
+                        WHERE item_id = ? 
+                        AND property_id = (SELECT id FROM properties WHERE name = ?)",
+                        rusqlite::params![&item.id, existing_prop],
+                    )?;
+                }
+            }
             tx.commit()?;
             log!("[DB] Transaction committed successfully");
             Ok(())
