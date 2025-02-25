@@ -66,6 +66,7 @@ pub async fn load_items_from_db(current_url: &str) -> Result<Vec<Item>, String> 
 
 #[component]
 pub fn ItemsList(
+    url: String, 
     items: ReadSignal<Vec<Item>>,
     set_items: WriteSignal<Vec<Item>>,
 ) -> impl IntoView {

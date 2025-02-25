@@ -31,31 +31,31 @@ pub fn App() -> impl IntoView {
     view! {
         <Router>
             <Routes>
-                <Route path="/:url?" view=move || {
-                    let params = use_params_map();
-                    let url = move || params.with(|params| params.get("url").cloned().unwrap_or_default());
+                <Route path="/*url" view=move || {
+                    let location = use_location();
+                    let current_url = move || location.pathname.get();
                     
-                    // This effect will re-run when URL changes
-                    create_effect(move |_| {
-                        let current_url = url();
-                        spawn_local(async move {
-                            // Load items for new URL
-                            match load_items_from_db(&current_url).await {
-                                Ok(loaded_items) => {
-                                    set_items.set(loaded_items);
-                                }
-                                Err(err) => log!("Error loading items: {}", err),
+                    // Proper async handling
+                    spawn_local({
+                        let current_url = current_url.clone();
+                        async move {
+                            match load_items_from_db(&current_url()).await {
+                                Ok(items) => set_items.set(items),
+                                Err(e) => log!("Error loading items: {}", e),
                             }
-                        });
-                    });
-                        view! {
-                            <Stylesheet href="/assets/style.css" />
-                            <Stylesheet href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css" />
-                            <div>
-                                <h1>{ "CompareWare" }</h1>
-                                <ItemsList items=items_signal set_items=set_items />
-                            </div>
                         }
+                    });
+                    view! {
+                        <Stylesheet href="/assets/style.css" />
+                        <Stylesheet href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css" />
+                        <div>
+                            <h1>{ "CompareWare" }</h1>
+                            <ItemsList 
+                            url=current_url() 
+                            items=items_signal 
+                            set_items=set_items />
+                        </div>
+                    }
                 }/>
             </Routes>
         </Router>
