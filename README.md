@@ -27,6 +27,38 @@ CompareWare is an open-source platform for comparing tools (software, hardware, 
    ```
 3. Open your browser at [http://localhost:3000](http://localhost:3000)
 
+## **Database Schema**
+### Key Concepts
+- **PK (Primary Key)**: Unique identifier for table records (🔑)
+- **FK (Foreign Key)**: Reference linking related tables (➡️)
+
+### **Tables Overview**
+
+### Core Tables
+| Table | Columns (PK/FK) | Description | Example Data |
+|-------|------------------|-------------|--------------|
+| **urls** | `id` (PK), `url`, `created_at` | Stores comparison URLs | `1, "/laptops", 2024-03-01` |
+| **items** | `id` (PK), `url_id` (FK), `name`, `description`, `wikidata_id` | Comparison items | `"item1", 1, "MacBook Pro", "16-inch", "Q214276"` |
+| **properties** | `id` (PK), `name`, `global_usage_count` | Available properties | `25, "screen_size", 150` |
+| **item_properties** | `item_id` (PK/FK), `property_id` (PK/FK), `value` | Item-specific values | `"item1", 25, "16 inches"` |
+| **selected_properties** | `url_id` (PK/FK), `property_id` (PK/FK) | Active properties per URL | `1, 25` |
+
+### Data Flow
+```mermaid
+flowchart LR
+    User -->|Creates| urls
+    User -->|Adds| items
+    User -->|Defines| properties
+    User -->|Selects| selected_properties
+    User -->|Sets Values| item_properties
+    
+    urls -->|url_id| items
+    urls -->|url_id| selected_properties
+    properties -->|property_id| selected_properties
+    items -->|item_id| item_properties
+    properties -->|property_id| item_properties
+```
+
 ### **Collaboration**
 We welcome contributions! Here’s how you can help:
 
