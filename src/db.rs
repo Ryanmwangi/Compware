@@ -9,6 +9,77 @@ mod db_impl {
     use crate::models::item::Item;
     use leptos::logging::log;
 
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use tokio::runtime::Runtime;
+        use uuid::Uuid;
+
+        // Helper function to create test database
+        async fn create_test_db() -> Database {
+            let db = Database::new(":memory:").unwrap();
+            db.create_schema().await.unwrap();
+            db
+        }
+
+        // Test database schema creation
+        #[tokio::test]
+        async fn test_schema_creation() {
+            let db = create_test_db().await;
+            // Verify tables exist
+            let conn = db.conn.lock().await;
+            let mut stmt = conn.prepare("SELECT name FROM sqlite_master WHERE type='table'").unwrap();
+            let tables: Vec<String> = stmt.query_map([], |row| row.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
+
+            assert!(tables.contains(&"urls".to_string()));
+            assert!(tables.contains(&"items".to_string()));
+            assert!(tables.contains(&"properties".to_string()));
+            assert!(tables.contains(&"item_properties".to_string()));
+        }
+
+        // Item Lifecycle Tests
+        #[tokio::test]
+        async fn test_full_item_lifecycle() {
+            let db = create_test_db().await;
+            let test_url = "https://example.com";
+            let test_item = Item {
+                id: Uuid::new_v4().to_string(),
+                name: "Test Item".into(),
+                description: "Test Description".into(),
+                wikidata_id: Some("Q123".into()),
+                custom_properties: vec![
+                    ("price".into(), "100".into()),
+                    ("color".into(), "red".into())
+                ].into_iter().collect(),
+            };
+        
+            // Test insertion
+            db.insert_item_by_url(test_url, &test_item).await.unwrap();
+
+            // Test retrieval
+            let items = db.get_items_by_url(test_url).await.unwrap();
+            assert_eq!(items.len(), 1);
+            let stored_item = &items[0];
+            assert_eq!(stored_item.name, test_item.name);
+            assert_eq!(stored_item.custom_properties.len(), 2);
+        
+            // Test update
+            let mut updated_item = test_item.clone();
+            updated_item.name = "Updated Name".into();
+            db.insert_item_by_url(test_url, &updated_item).await.unwrap();
+
+            // Verify update
+            let items = db.get_items_by_url(test_url).await.unwrap();
+            assert_eq!(items[0].name, "Updated Name");
+        
+            // Test deletion
+            db.delete_item_by_url(test_url, &test_item.id).await.unwrap();
+            let items = db.get_items_by_url(test_url).await.unwrap();
+            assert!(items.is_empty());
+        }
+
+    }
+
     // Define a struct to represent a database connection
     #[derive(Debug)]
     pub struct Database {
