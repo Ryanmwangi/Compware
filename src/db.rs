@@ -78,6 +78,36 @@ mod db_impl {
             assert!(items.is_empty());
         }
 
+        //property management tests
+        #[tokio::test]
+        async fn test_property_operations() {
+            let db = create_test_db().await;
+            let test_url = "https://props.com";
+            let test_item = Item {
+                id: Uuid::new_v4().to_string(),
+                name: "Test Item".into(),
+                description: "Test Description".into(),
+                wikidata_id: Some("Q123".into()),
+                custom_properties: vec![
+                    ("price".into(), "100".into()),
+                    ("color".into(), "red".into())
+                ].into_iter().collect(),
+            };        
+            // Test property creation
+            db.insert_item_by_url(test_url, &test_item).await.unwrap();
+
+            // Verify properties stored
+            let items = db.get_items_by_url(test_url).await.unwrap();
+            assert_eq!(items[0].custom_properties.len(), 2);
+        
+            // Test property deletion
+            db.delete_property_by_url(test_url, "price").await.unwrap();
+            let items = db.get_items_by_url(test_url).await.unwrap();
+            assert_eq!(items[0].custom_properties.len(), 1);
+            assert!(!items[0].custom_properties.contains_key("price"));
+        }
+
+
     }
 
     // Define a struct to represent a database connection
