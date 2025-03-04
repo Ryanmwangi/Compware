@@ -35,6 +35,7 @@ mod db_impl {
             assert!(tables.contains(&"items".to_string()));
             assert!(tables.contains(&"properties".to_string()));
             assert!(tables.contains(&"item_properties".to_string()));
+            assert!(tables.contains(&"selected_properties".to_string()));
         }
 
         // Item Lifecycle Tests
