@@ -79,6 +79,30 @@ mod db_impl {
             assert!(items.is_empty());
         }
 
+        //URL Management Tests
+        #[tokio::test]
+        async fn test_url_management() {
+            let db = create_test_db().await;
+            let test_url = "https://test.com";
+        
+            // Test URL creation
+            let url_id = db.insert_url(test_url).await.unwrap();
+            assert!(url_id > 0);
+        
+            // Test duplicate URL handling
+            let duplicate_id = db.insert_url(test_url).await.unwrap();
+            assert_eq!(url_id, duplicate_id);
+        
+            // Test URL retrieval
+            let conn = db.conn.lock().await;
+            let stored_url: String = conn.query_row(
+                "SELECT url FROM urls WHERE id = ?",
+                [url_id],
+                |row| row.get(0)
+            ).unwrap();
+            assert_eq!(stored_url, test_url);
+        }
+
         //property management tests
         #[tokio::test]
         async fn test_property_operations() {
@@ -107,7 +131,6 @@ mod db_impl {
             assert_eq!(items[0].custom_properties.len(), 1);
             assert!(!items[0].custom_properties.contains_key("price"));
         }
-
 
     }
 
@@ -203,9 +226,23 @@ mod db_impl {
 
         // Insert a new URL into the database
         pub async fn insert_url(&self, url: &str) -> Result<i64, Error> {
-            let conn = self.conn.lock().await;
-            let mut stmt = conn.prepare("INSERT INTO urls (url) VALUES (?)")?;
-            let url_id = stmt.insert(&[url])?;
+            let mut conn = self.conn.lock().await;
+            let tx = conn.transaction()?;
+    
+            // Use INSERT OR IGNORE to handle duplicates
+            tx.execute(
+                "INSERT OR IGNORE INTO urls (url) VALUES (?)",
+                [url]
+            )?;
+
+            // Get the URL ID whether it was inserted or already existed
+            let url_id = tx.query_row(
+                "SELECT id FROM urls WHERE url = ?",
+                [url],
+                |row| row.get(0)
+            )?;
+
+            tx.commit()?;
             logging::log!("URL inserted: {}", url);
             Ok(url_id)
         }
