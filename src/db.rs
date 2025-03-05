@@ -132,6 +132,27 @@ mod db_impl {
             assert!(!items[0].custom_properties.contains_key("price"));
         }
 
+        //selected properties test
+        #[tokio::test]
+        async fn test_selected_properties() {
+            let db = create_test_db().await;
+            let test_url = "https://selected.com";
+
+            // Add test properties
+            db.add_selected_property(test_url, "price").await.unwrap();
+            db.add_selected_property(test_url, "weight").await.unwrap();
+        
+            // Test retrieval
+            let props = db.get_selected_properties(test_url).await.unwrap();
+            assert_eq!(props.len(), 2);
+            assert!(props.contains(&"price".to_string()));
+            assert!(props.contains(&"weight".to_string()));
+        
+            // Test duplicate prevention
+            db.add_selected_property(test_url, "price").await.unwrap();
+            let props = db.get_selected_properties(test_url).await.unwrap();
+            assert_eq!(props.len(), 2); // No duplicate added
+        }
     }
 
     // Define a struct to represent a database connection
