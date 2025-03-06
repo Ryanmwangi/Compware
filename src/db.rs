@@ -552,6 +552,12 @@ mod db_impl {
             let mut conn = self.conn.lock().await;
             let tx = conn.transaction()?;
             
+            // Insert URL if it does not exists
+            tx.execute(
+                "INSERT OR IGNORE INTO urls (url) VALUES (?)",
+                [url]
+            )?;
+            
             // Get URL ID
             let url_id = tx.query_row(
                 "SELECT id FROM urls WHERE url = ?",
