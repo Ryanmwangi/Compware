@@ -378,43 +378,68 @@ mod db_impl {
             log!("Fetching items for URL '{}' (ID: {})", url, url_id);
 
             let mut stmt = conn.prepare(
-                "SELECT i.id, i.name, i.description, i.wikidata_id, 
-                        p.name AS prop_name, ip.value
-                 FROM items i
-                 LEFT JOIN item_properties ip ON i.id = ip.item_id
-                 LEFT JOIN properties p ON ip.property_id = p.id
-                 WHERE i.url_id = ?
-                 ORDER BY i.item_order ASC",
+                "WITH ordered_items AS (
+                    SELECT 
+                        i.id,
+                        i.name,
+                        i.description,
+                        i.wikidata_id,
+                        i.item_order
+                    FROM items i
+                    WHERE i.url_id = ?
+                    ORDER BY i.item_order ASC
+                )
+                SELECT 
+                    oi.id,
+                    oi.name,
+                    oi.description,
+                    oi.wikidata_id,
+                    p.name AS prop_name,
+                    ip.value
+                FROM ordered_items oi
+                LEFT JOIN item_properties ip ON oi.id = ip.item_id
+                LEFT JOIN properties p ON ip.property_id = p.id
+                ORDER BY oi.item_order ASC"
             )?;
-            let mut items: HashMap<String, Item> = HashMap::new();
-
+        
+            // Change from HashMap to Vec to preserve order
+            let mut items: Vec<Item> = Vec::new();
+            let mut current_id: Option<String> = None;
+        
             let rows = stmt.query_map([url_id], |row| {
                 Ok((
-                    row.get::<_, String>(0)?,         // id
-                    row.get::<_, String>(1)?,         // name
-                    row.get::<_, String>(2)?,         // description
-                    row.get::<_, Option<String>>(3)?, // wikidata_id
-                    row.get::<_, Option<String>>(4)?, // prop_name
-                    row.get::<_, Option<String>>(5)?, // value
+                    row.get::<_, String>(0)?,  // id
+                    row.get::<_, String>(1)?,  // name
+                    row.get::<_, String>(2)?,  // description
+                    row.get::<_, Option<String>>(3)?,  // wikidata_id
+                    row.get::<_, Option<String>>(4)?,  // prop_name
+                    row.get::<_, Option<String>>(5)?,  // value
                 ))
             })?;
-
+        
             for row in rows {
                 let (id, name, desc, wd_id, prop, val) = row?;
-                let item = items.entry(id.clone()).or_insert(Item {
-                    id,
-                    name,
-                    description: desc,
-                    wikidata_id: wd_id,
-                    custom_properties: HashMap::new(),
-                });
-
+                
+                if current_id.as_ref() != Some(&id) {
+                    // New item - push to vector
+                    items.push(Item {
+                        id: id.clone(),
+                        name,
+                        description: desc,
+                        wikidata_id: wd_id,
+                        custom_properties: HashMap::new(),
+                    });
+                    current_id = Some(id);
+                }
+        
                 if let (Some(p), Some(v)) = (prop, val) {
-                    item.custom_properties.insert(p, v);
+                    if let Some(last_item) = items.last_mut() {
+                        last_item.custom_properties.insert(p, v);
+                    }
                 }
             }
-
-            Ok(items.into_values().collect())
+        
+            Ok(items)
         }
 
         async fn get_or_create_property(
