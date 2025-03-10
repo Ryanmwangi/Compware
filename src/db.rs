@@ -261,6 +261,7 @@ mod db_impl {
                     name TEXT NOT NULL,
                     description TEXT,
                     wikidata_id TEXT,
+                    item_order INTEGER NOT NULL DEFAULT 0,
                     FOREIGN KEY (url_id) REFERENCES urls(id) ON DELETE CASCADE
                 );",
             )
@@ -382,7 +383,8 @@ mod db_impl {
                  FROM items i
                  LEFT JOIN item_properties ip ON i.id = ip.item_id
                  LEFT JOIN properties p ON ip.property_id = p.id
-                 WHERE i.url_id = ?",
+                 WHERE i.url_id = ?
+                 ORDER BY i.item_order ASC",
             )?;
             let mut items: HashMap<String, Item> = HashMap::new();
 
@@ -467,22 +469,30 @@ mod db_impl {
                 Err(e) => return Err(e.into()),
             };
 
+            let max_order: i32 = tx.query_row(
+                "SELECT COALESCE(MAX(item_order), 0) FROM items WHERE url_id = ?",
+                [url_id],
+                |row| row.get(0),
+            )?;
+
             // 4. Item insertion
             log!("[DB] Upserting item");
             tx.execute(
-                "INSERT INTO items (id, url_id, name, description, wikidata_id)
-                VALUES (?, ?, ?, ?, ?)
+                "INSERT INTO items (id, url_id, name, description, wikidata_id, item_order)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     url_id = excluded.url_id,
                     name = excluded.name,
                     description = excluded.description,
-                    wikidata_id = excluded.wikidata_id",
+                    wikidata_id = excluded.wikidata_id,
+                    item_order = excluded.item_order",
                 rusqlite::params![
                     &item.id,
                     url_id,
                     &item.name,
                     &item.description,
-                    &item.wikidata_id
+                    &item.wikidata_id,
+                    max_order + 1
                 ],
             )?;
             log!("[DB] Item upserted successfully");
