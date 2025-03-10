@@ -509,8 +509,7 @@ mod db_impl {
                     url_id = excluded.url_id,
                     name = excluded.name,
                     description = excluded.description,
-                    wikidata_id = excluded.wikidata_id,
-                    item_order = excluded.item_order",
+                    wikidata_id = excluded.wikidata_id",
                 rusqlite::params![
                     &item.id,
                     url_id,
