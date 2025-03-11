@@ -501,8 +501,7 @@ mod db_impl {
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     url_id = excluded.url_id,
-                    wikidata_id = excluded.wikidata_id,
-                    item_order = excluded.item_order",
+                    wikidata_id = excluded.wikidata_id",
                 rusqlite::params![
                     &item.id,
                     url_id,
