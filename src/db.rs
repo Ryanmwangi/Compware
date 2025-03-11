@@ -488,13 +488,13 @@ mod db_impl {
                 Err(e) => return Err(e.into()),
             };
 
+            // 4. Item insertion
             let max_order: i32 = tx.query_row(
                 "SELECT COALESCE(MAX(item_order), 0) FROM items WHERE url_id = ?",
                 [url_id],
                 |row| row.get(0),
             )?;
 
-            // 4. Item insertion
             log!("[DB] Upserting item");
             tx.execute(
                 "INSERT INTO items (id, url_id, wikidata_id, item_order)
@@ -512,7 +512,7 @@ mod db_impl {
             )?;
             log!("[DB] Item upserted successfully");
 
-            // Combine core properties with custom ones
+            // property handling
             let core_properties = vec![
                 ("name", &item.name),
                 ("description", &item.description)
@@ -532,58 +532,35 @@ mod db_impl {
                 )?;
             }
 
-            // Property handling with enhanced logging
+            // Property synchronization
             log!("[DB] Synchronizing properties for item {}", item.id);
             let existing_props = {
-                // Prepare statement and collect existing properties
                 let mut stmt = tx.prepare(
                     "SELECT p.name, ip.value 
                     FROM item_properties ip
                     JOIN properties p ON ip.property_id = p.id
                     WHERE ip.item_id = ?",
                 )?;
-
+            
                 let mapped_rows = stmt.query_map([&item.id], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                 })?;
-
+            
                 mapped_rows.collect::<Result<HashMap<String, String>, _>>()?
             };
 
-            for (prop, value) in &item.custom_properties {
-                // Update existing or insert new
-                let prop_id = self.get_or_create_property(&mut tx, prop).await?;
-                if let Some(existing_value) = existing_props.get(prop) {
-                    if existing_value != value {
-                        log!(
-                            "[DB] Updating property {} from '{}' to '{}'",
-                            prop,
-                            existing_value,
-                            value
-                        );
-                        tx.execute(
-                            "UPDATE item_properties 
-                            SET value = ? 
-                            WHERE item_id = ? 
-                            AND property_id = (SELECT id FROM properties WHERE name = ?)",
-                            rusqlite::params![value, &item.id, prop],
-                        )?;
-                    }
-                } else {
-                    log!("[DB] Adding new property {}", prop);
-                    tx.execute(
-                        "INSERT INTO item_properties (item_id, property_id, value)
-                        VALUES (?, ?, ?)",
-                        rusqlite::params![&item.id, prop_id, value],
-                    )?;
-                }
-            }
-
-            // Remove deleted properties
-            let current_props: HashSet<&str> =
-                item.custom_properties.keys().map(|s| s.as_str()).collect();
+            // Include core properties in current_props check
+            let mut current_props: HashSet<&str> = item.custom_properties.keys()
+                .map(|s| s.as_str())
+                .collect();
+            current_props.insert("name");
+            current_props.insert("description");
+            
+            // Cleanup with core property protection
             for (existing_prop, _) in existing_props {
-                if !current_props.contains(existing_prop.as_str()) {
+                if !current_props.contains(existing_prop.as_str()) 
+                    && !["name", "description"].contains(&existing_prop.as_str())
+                {
                     log!("[DB] Removing deleted property {}", existing_prop);
                     tx.execute(
                         "DELETE FROM item_properties 
