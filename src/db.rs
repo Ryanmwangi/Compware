@@ -258,12 +258,13 @@ mod db_impl {
                 "CREATE TABLE IF NOT EXISTS items (
                     id TEXT PRIMARY KEY,
                     url_id INTEGER NOT NULL,
-                    name TEXT NOT NULL,
-                    description TEXT,
                     wikidata_id TEXT,
                     item_order INTEGER NOT NULL DEFAULT 0,
                     FOREIGN KEY (url_id) REFERENCES urls(id) ON DELETE CASCADE
-                );",
+                );
+                INSERT OR IGNORE INTO properties (name) VALUES 
+                ('name'), 
+                ('description');",
             )
             .map_err(|e| {
                 eprintln!("Failed creating items table: {}", e);
@@ -381,62 +382,55 @@ mod db_impl {
                 "WITH ordered_items AS (
                     SELECT 
                         i.id,
-                        i.name,
-                        i.description,
                         i.wikidata_id,
                         i.item_order
                     FROM items i
                     WHERE i.url_id = ?
                     ORDER BY i.item_order ASC
                 )
-                SELECT 
+                SELECT
                     oi.id,
-                    oi.name,
-                    oi.description,
                     oi.wikidata_id,
-                    p.name AS prop_name,
-                    ip.value
+                    name_ip.value AS name,
+                    desc_ip.value AS description,
+                    json_group_object(p.name, ip.value) as custom_properties
                 FROM ordered_items oi
-                LEFT JOIN item_properties ip ON oi.id = ip.item_id
-                LEFT JOIN properties p ON ip.property_id = p.id
+                LEFT JOIN item_properties ip 
+                    ON oi.id = ip.item_id
+                    AND ip.property_id NOT IN (
+                        SELECT id FROM properties WHERE name IN ('name', 'description')
+                    )
+                LEFT JOIN properties p 
+                    ON ip.property_id = p.id
+                LEFT JOIN item_properties name_ip 
+                    ON oi.id = name_ip.item_id
+                    AND name_ip.property_id = (SELECT id FROM properties WHERE name = 'name')
+                LEFT JOIN item_properties desc_ip 
+                    ON oi.id = desc_ip.item_id
+                    AND desc_ip.property_id = (SELECT id FROM properties WHERE name = 'description')
+                GROUP BY oi.id
                 ORDER BY oi.item_order ASC"
             )?;
         
             // Change from HashMap to Vec to preserve order
-            let mut items: Vec<Item> = Vec::new();
-            let mut current_id: Option<String> = None;
         
             let rows = stmt.query_map([url_id], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,  // id
-                    row.get::<_, String>(1)?,  // name
-                    row.get::<_, String>(2)?,  // description
-                    row.get::<_, Option<String>>(3)?,  // wikidata_id
-                    row.get::<_, Option<String>>(4)?,  // prop_name
-                    row.get::<_, Option<String>>(5)?,  // value
-                ))
+                  let custom_props_json: String = row.get(4)?;
+                  let custom_properties: HashMap<String, String> = serde_json::from_str(&custom_props_json)
+                      .unwrap_or_default();
+    
+                  Ok(Item {
+                      id: row.get(0)?,
+                      name: row.get::<_, Option<String>>(2)?.unwrap_or_default(), // Handle NULL values for name
+                      description: row.get::<_, Option<String>>(3)?.unwrap_or_default(), // Handle NULL values for description
+                      wikidata_id: row.get(1)?,
+                      custom_properties,
+                  })
             })?;
         
+            let mut items = Vec::new();
             for row in rows {
-                let (id, name, desc, wd_id, prop, val) = row?;
-                
-                if current_id.as_ref() != Some(&id) {
-                    // New item - push to vector
-                    items.push(Item {
-                        id: id.clone(),
-                        name,
-                        description: desc,
-                        wikidata_id: wd_id,
-                        custom_properties: HashMap::new(),
-                    });
-                    current_id = Some(id);
-                }
-        
-                if let (Some(p), Some(v)) = (prop, val) {
-                    if let Some(last_item) = items.last_mut() {
-                        last_item.custom_properties.insert(p, v);
-                    }
-                }
+                items.push(row?);
             }
         
             Ok(items)
@@ -503,23 +497,41 @@ mod db_impl {
             // 4. Item insertion
             log!("[DB] Upserting item");
             tx.execute(
-                "INSERT INTO items (id, url_id, name, description, wikidata_id, item_order)
-                VALUES (?, ?, ?, ?, ?, ?)
+                "INSERT INTO items (id, url_id, wikidata_id, item_order)
+                VALUES (?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     url_id = excluded.url_id,
-                    name = excluded.name,
-                    description = excluded.description,
-                    wikidata_id = excluded.wikidata_id",
+                    wikidata_id = excluded.wikidata_id,
+                    item_order = excluded.item_order",
                 rusqlite::params![
                     &item.id,
                     url_id,
-                    &item.name,
-                    &item.description,
                     &item.wikidata_id,
                     max_order + 1
                 ],
             )?;
             log!("[DB] Item upserted successfully");
+
+            // Combine core properties with custom ones
+            let core_properties = vec![
+                ("name", &item.name),
+                ("description", &item.description)
+            ];
+
+            for (prop, value) in core_properties.into_iter().chain(
+                item.custom_properties.iter().map(|(k, v)| (k.as_str(), v))
+            ) {
+                let prop_id = self.get_or_create_property(&mut tx, prop).await?;
+                
+                tx.execute(
+                    "INSERT INTO item_properties (item_id, property_id, value)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(item_id, property_id) DO UPDATE SET
+                        value = excluded.value",
+                    rusqlite::params![&item.id, prop_id, value],
+                )?;
+            }
+
             // Property handling with enhanced logging
             log!("[DB] Synchronizing properties for item {}", item.id);
             let existing_props = {
