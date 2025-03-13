@@ -1,0 +1,11 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./compareware.db:/app/compareware.db
+    environment:
+      - RUST_LOG=info
+      - LEPTOS_ENV=production
+    restart: unless-stopped
