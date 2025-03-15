@@ -58,6 +58,23 @@ flowchart LR
     items -->|item_id| item_properties
     properties -->|property_id| item_properties
 ```
+## **Docker Deployment**
+
+### **Prerequisites**
+- Docker installed on your system
+- Docker Compose (usually included with Docker Desktop)
+
+### **Running with Docker**
+1. Clone the repository:
+   ```bash
+   git clone https://forge.ftt.gmbh/ryanmwangi/Compware.git
+   cd compareware
+   ```
+2. Start the container:
+   ```bash
+   docker-compose up -d
+   ```
+3. Access the application at: [http://localhost:3000](http://localhost:3000)
 
 ### **Collaboration**
 We welcome contributions! Here’s how you can help:
