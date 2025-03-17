@@ -31,17 +31,17 @@ CompareWare is an open-source platform for comparing tools (software, hardware, 
 ### Key Concepts
 - **PK (Primary Key)**: Unique identifier for table records (🔑)
 - **FK (Foreign Key)**: Reference linking related tables (➡️)
+- **Core (core properties)**: name and description.
 
-### **Tables Overview**
+### Tables Overview
 
-### Core Tables
 | Table | Columns (PK/FK) | Description | Example Data |
 |-------|------------------|-------------|--------------|
 | **urls** | `id` (PK), `url`, `created_at` | Stores comparison URLs | `1, "/laptops", 2024-03-01` |
-| **items** | `id` (PK), `url_id` (FK), `name`, `description`, `wikidata_id` | Comparison items | `"item1", 1, "MacBook Pro", "16-inch", "Q214276"` |
-| **properties** | `id` (PK), `name`, `global_usage_count` | Available properties | `25, "screen_size", 150` |
-| **item_properties** | `item_id` (PK/FK), `property_id` (PK/FK), `value` | Item-specific values | `"item1", 25, "16 inches"` |
-| **selected_properties** | `url_id` (PK/FK), `property_id` (PK/FK) | Active properties per URL | `1, 25` |
+| **items** | `id` (PK), `url_id` (FK), `wikidata_id` | Comparison items | `"item1", 1, "Q214276"` |
+| **properties** | `id` (PK), `name` | All available properties (including core) | `1.0, "name"`<br>`2.0, "description"`<br>`3.0, "screen_size"` |
+| **item_properties** | `item_id` (PK/FK), `property_id` (PK/FK), `value` | All property values including name/description | `"item1", 1.0, "MacBook Pro"`<br>`"item1", 2.0, "16-inch laptop"`<br>`"item1", 3.0, "16 inches"` |
+| **selected_properties** | `url_id` (PK/FK), `property_id` (PK/FK) | Active properties per URL (excludes core) | `1, 3.0` |
 
 ### Data Flow
 ```mermaid
