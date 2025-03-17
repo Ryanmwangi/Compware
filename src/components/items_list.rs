@@ -352,32 +352,44 @@ pub fn ItemsList(
     let (wikidata_suggestions, set_wikidata_suggestions) = create_signal(HashMap::<String, Vec<WikidataSuggestion>>::new());
 
     // Function to fetch Wikidata suggestions
-    let fetch_wikidata_suggestions = move |key: String, query: String| {
-        log!("Fetching suggestions for key: {}, query: {}", key, query);
-        spawn_local(async move {
-            if query.is_empty() {
-                set_wikidata_suggestions.update(|suggestions| {
-                    suggestions.remove(&key);
-                });
-                return;
-            }
+    let fetch_wikidata_suggestions = {
+        let mut debounce_timers = std::collections::HashMap::<String, gloo_timers::future::TimeoutFuture>::new();
+        Rc::new(move |key: String, query: String| {
+            log!("Fetching suggestions for key: {}, query: {}", key, query);
 
-            let url = format!(
-                "https://www.wikidata.org/w/api.php?action=wbsearchentities&search={}&language=en&limit=5&format=json&origin=*",
-                query
-            );
+            // Cancel previous timer for this key
+            debounce_timers.remove(&key);
 
-            match gloo_net::http::Request::get(&url).send().await {
-                Ok(response) => {
-                    if let Ok(data) = response.json::<WikidataResponse>().await {
-                        set_wikidata_suggestions.update(|suggestions| {
-                            suggestions.insert(key, data.search);
-                        });
-                    }
+            // Store new timer
+            let timer = gloo_timers::future::TimeoutFuture::new(300);
+            debounce_timers.insert(key.clone(), timer);
+
+            spawn_local(async move {
+                timer.await;
+                if query.is_empty() {
+                    set_wikidata_suggestions.update(|suggestions| {
+                        suggestions.remove(&key);
+                    });
+                    return;
                 }
-                Err(_) => log!("Failed to fetch Wikidata suggestions"),
-            }
-        });
+
+                let url = format!(
+                    "https://www.wikidata.org/w/api.php?action=wbsearchentities&search={}&language=en&limit=5&format=json&origin=*",
+                    query
+                );
+
+                match gloo_net::http::Request::get(&url).send().await {
+                    Ok(response) => {
+                        if let Ok(data) = response.json::<WikidataResponse>().await {
+                            set_wikidata_suggestions.update(|suggestions| {
+                                suggestions.insert(key, data.search);
+                            });
+                        }
+                    }
+                    Err(_) => log!("Failed to fetch Wikidata suggestions"),
+                }
+            });
+        })
     };
 
     //function to fetch properties
@@ -724,6 +736,7 @@ pub fn ItemsList(
                                 <td>{ property }</td>
                                 {move || items.get().iter().enumerate().map(|(index, item)| {
                                     let update_item_clone = Arc::clone(&update_item_cloned);
+                                    let fetch_wikidata_suggestions_clone = Rc::clone(&fetch_wikidata_suggestions);
                                         view! {
                                             <td>
                                             {match property {
@@ -732,8 +745,13 @@ pub fn ItemsList(
                                                         <EditableCell
                                                             value=item.name.clone()
                                                             on_input=move |value| {
+                                                                let fetch_wiki = Rc::clone(&fetch_wikidata_suggestions_clone);
                                                                 update_item_clone(index, "name", value.clone());
-                                                                fetch_wikidata_suggestions(format!("name-{}", index), value);
+                                                                // Show suggestions when typing starts
+                                                                set_show_suggestions.update(|suggestions| {
+                                                                    suggestions.insert(format!("name-{}", index), !value.is_empty());
+                                                                });
+                                                                fetch_wiki(format!("name-{}", index), value);
                                                             }
                                                             key=Arc::new(format!("name-{}", index))
                                                             focused_cell=focused_cell
@@ -745,25 +763,12 @@ pub fn ItemsList(
                                                                 });
                                                             }))
                                                             on_blur=Some(Callback::new(move |_| {
-                                                                log!("Input blurred, delaying hiding suggestions");
-                                                                spawn_local(async move {
-                                                                    gloo_timers::future::sleep(std::time::Duration::from_millis(500)).await;
-                                                                    log!("Hiding suggestions after delay");
-                                                                    set_show_suggestions.update(|suggestions| {
-                                                                        suggestions.insert(format!("name-{}", index), false);
-                                                                    });
+                                                                set_show_suggestions.update(|suggestions| {
+                                                                    suggestions.insert(format!("name-{}", index), false);
                                                                 });
                                                             }))
                                                             input_type=InputType::Text
                                                         />
-                                                        <button class="search-icon" on:click=move |_| {
-                                                            log!("Search icon clicked, showing suggestions");
-                                                            set_show_suggestions.update(|suggestions| {
-                                                                suggestions.insert(format!("name-{}", index), true);
-                                                            });
-                                                        }> 
-                                                            <i class="fas fa-search"></i> Search Wiki
-                                                        </button>
                                                         {move || {
                                                             if *show_suggestions.get().get(&format!("name-{}", index)).unwrap_or(&false) {
                                                                 log!("Rendering suggestions list");
