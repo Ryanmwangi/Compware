@@ -8,7 +8,7 @@ mod db_impl {
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
     use tokio::sync::Mutex;
-
+    use uuid::Uuid;
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -271,6 +271,14 @@ mod db_impl {
                 e
             })?;
 
+            // Add a global_item_id column to the items table
+            conn.execute_batch(
+                "ALTER TABLE items ADD COLUMN global_item_id TEXT;"
+            ).map_err(|e| {
+                eprintln!("Failed adding global_item_id to items table: {}", e);
+                e
+            })?;
+
             // 4. Table for selected properties
             conn.execute_batch(
                 "CREATE TABLE IF NOT EXISTS selected_properties (
@@ -289,11 +297,11 @@ mod db_impl {
             // 5. Junction table for custom properties
             conn.execute_batch(
                 "CREATE TABLE IF NOT EXISTS item_properties (
-                    item_id TEXT NOT NULL,
+                    global_item_id TEXT NOT NULL,
                     property_id INTEGER NOT NULL,
                     value TEXT NOT NULL,
-                    PRIMARY KEY (item_id, property_id),
-                    FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE,
+                    PRIMARY KEY (global_item_id, property_id),
+                    FOREIGN KEY (global_item_id) REFERENCES items(global_item_id) ON DELETE CASCADE,
                     FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE
                 );",
             )
@@ -383,7 +391,8 @@ mod db_impl {
                     SELECT 
                         i.id,
                         i.wikidata_id,
-                        i.item_order
+                        i.item_order,
+                        i.global_item_id 
                     FROM items i
                     WHERE i.url_id = ?
                     ORDER BY i.item_order ASC
@@ -396,17 +405,17 @@ mod db_impl {
                     json_group_object(p.name, ip.value) as custom_properties
                 FROM ordered_items oi
                 LEFT JOIN item_properties ip 
-                    ON oi.id = ip.item_id
+                    ON oi.global_item_id = ip.global_item_id
                     AND ip.property_id NOT IN (
                         SELECT id FROM properties WHERE name IN ('name', 'description')
                     )
                 LEFT JOIN properties p 
                     ON ip.property_id = p.id
                 LEFT JOIN item_properties name_ip 
-                    ON oi.id = name_ip.item_id
+                    ON oi.global_item_id = name_ip.global_item_id
                     AND name_ip.property_id = (SELECT id FROM properties WHERE name = 'name')
                 LEFT JOIN item_properties desc_ip 
-                    ON oi.id = desc_ip.item_id
+                    ON oi.global_item_id = desc_ip.global_item_id
                     AND desc_ip.property_id = (SELECT id FROM properties WHERE name = 'description')
                 GROUP BY oi.id
                 ORDER BY oi.item_order ASC"
@@ -495,18 +504,36 @@ mod db_impl {
                 |row| row.get(0),
             )?;
 
+            let global_item_id = match tx.query_row(
+                "SELECT ip.global_item_id
+                 FROM item_properties ip
+                 JOIN properties p ON ip.property_id = p.id
+                 WHERE p.name = 'name' AND ip.value = ? LIMIT 1",
+                [&item.name],
+                |row| row.get::<_, String>(0),
+            ) {
+                Ok(id) => id, // Reuse existing global_item_id
+                Err(rusqlite::Error::QueryReturnedNoRows) => {
+                    let new_id = Uuid::new_v4().to_string(); // Generate a new global_item_id
+                    new_id
+                }
+                Err(e) => return Err(e.into()),
+            };
+
             log!("[DB] Upserting item");
             tx.execute(
-                "INSERT INTO items (id, url_id, wikidata_id, item_order)
-                VALUES (?, ?, ?, ?)
+                "INSERT INTO items (id, url_id, wikidata_id, item_order, global_item_id)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     url_id = excluded.url_id,
-                    wikidata_id = excluded.wikidata_id",
+                    wikidata_id = excluded.wikidata_id,
+                    global_item_id = excluded.global_item_id",
                 rusqlite::params![
                     &item.id,
                     url_id,
                     &item.wikidata_id,
-                    max_order + 1
+                    max_order + 1,
+                    &global_item_id
                 ],
             )?;
             log!("[DB] Item upserted successfully");
@@ -523,11 +550,11 @@ mod db_impl {
                 let prop_id = self.get_or_create_property(&mut tx, prop).await?;
                 
                 tx.execute(
-                    "INSERT INTO item_properties (item_id, property_id, value)
+                    "INSERT INTO item_properties (global_item_id, property_id, value)
                     VALUES (?, ?, ?)
-                    ON CONFLICT(item_id, property_id) DO UPDATE SET
+                    ON CONFLICT(global_item_id, property_id) DO UPDATE SET
                         value = excluded.value",
-                    rusqlite::params![&item.id, prop_id, value],
+                    rusqlite::params![&global_item_id, prop_id, value],
                 )?;
             }
 
@@ -538,7 +565,7 @@ mod db_impl {
                     "SELECT p.name, ip.value 
                     FROM item_properties ip
                     JOIN properties p ON ip.property_id = p.id
-                    WHERE ip.item_id = ?",
+                    WHERE ip.global_item_id = ?",
                 )?;
             
                 let mapped_rows = stmt.query_map([&item.id], |row| {
@@ -588,6 +615,11 @@ mod db_impl {
                 "DELETE FROM items WHERE id = ? AND url_id = ?",
                 [item_id, &url_id.to_string()],
             )?;
+        
+            tx.execute(
+                "DELETE FROM item_properties WHERE global_item_id = ?",
+                [item_id],
+            )?;
 
             tx.commit()?;
             Ok(())
@@ -608,10 +640,10 @@ mod db_impl {
                 WHERE property_id IN (
                     SELECT id FROM properties WHERE name = ?
                 )
-                AND item_id IN (
-                    SELECT id FROM items WHERE url_id = ?
+                AND global_item_id IN (
+                    SELECT global_item_id FROM items WHERE url_id = ?
                 )",
-                [property, &url_id.to_string()],
+                [property, &url_id.to_string()], // Use global_item_id instead of item_id
             )?;
 
             tx.commit()?;
