@@ -271,13 +271,21 @@ mod db_impl {
                 e
             })?;
 
-            // Add a global_item_id column to the items table
-            conn.execute_batch(
-                "ALTER TABLE items ADD COLUMN global_item_id TEXT;"
-            ).map_err(|e| {
-                eprintln!("Failed adding global_item_id to items table: {}", e);
-                e
-            })?;
+            // Check if the global_item_id column exists
+            let mut stmt = conn.prepare("PRAGMA table_info(items);")?;
+            let columns: Vec<String> = stmt
+                .query_map([], |row| row.get(1))? // Column 1 contains the column names
+                .collect::<Result<_, _>>()?;
+                
+            if !columns.contains(&"global_item_id".to_string()) {
+                conn.execute_batch(
+                    "ALTER TABLE items ADD COLUMN global_item_id TEXT;"
+                )
+                .map_err(|e| {
+                    eprintln!("Failed adding global_item_id to items table: {}", e);
+                    e
+                })?;
+            }
 
             // 4. Table for selected properties
             conn.execute_batch(
