@@ -276,7 +276,7 @@ mod db_impl {
             let columns: Vec<String> = stmt
                 .query_map([], |row| row.get(1))? // Column 1 contains the column names
                 .collect::<Result<_, _>>()?;
-                
+
             if !columns.contains(&"global_item_id".to_string()) {
                 conn.execute_batch(
                     "ALTER TABLE items ADD COLUMN global_item_id TEXT;"
@@ -317,6 +317,23 @@ mod db_impl {
                 eprintln!("Failed creating item_properties table: {}", e);
                 e
             })?;
+
+            // 6. Junction table for deleted properties
+            conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS deleted_properties (
+                url_id INTEGER NOT NULL,
+                global_item_id TEXT NOT NULL,
+                property_id INTEGER NOT NULL,
+                PRIMARY KEY (url_id, global_item_id, property_id),
+                FOREIGN KEY (url_id) REFERENCES urls(id) ON DELETE CASCADE,
+                FOREIGN KEY (global_item_id) REFERENCES items(global_item_id) ON DELETE CASCADE,
+                FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE
+                );",
+            ).map_err(|e| {
+                eprintln!("Failed creating item_properties table: {}", e);
+                e
+            })?;
+
             Ok(())
         }
 
@@ -415,7 +432,9 @@ mod db_impl {
                 LEFT JOIN item_properties ip 
                     ON oi.global_item_id = ip.global_item_id
                     AND ip.property_id NOT IN (
-                        SELECT id FROM properties WHERE name IN ('name', 'description')
+                        SELECT property_id
+                        FROM deleted_properties
+                        WHERE url_id = ? AND global_item_id = oi.global_item_id
                     )
                 LEFT JOIN properties p 
                     ON ip.property_id = p.id
@@ -430,8 +449,7 @@ mod db_impl {
             )?;
         
             // Change from HashMap to Vec to preserve order
-        
-            let rows = stmt.query_map([url_id], |row| {
+            let rows = stmt.query_map([url_id, url_id], |row| {
                   let custom_props_json: String = row.get(4)?;
                   let custom_properties: HashMap<String, String> = serde_json::from_str(&custom_props_json)
                       .unwrap_or_default();
@@ -637,23 +655,35 @@ mod db_impl {
         pub async fn delete_property_by_url(&self, url: &str, property: &str) -> Result<(), Error> {
             let mut conn = self.conn.lock().await;
             let tx = conn.transaction()?;
-
+        
             // Get URL ID
             let url_id: i64 =
                 tx.query_row("SELECT id FROM urls WHERE url = ?", [url], |row| row.get(0))?;
-
-            // Delete property from all items in this URL
-            tx.execute(
-                "DELETE FROM item_properties 
-                WHERE property_id IN (
-                    SELECT id FROM properties WHERE name = ?
-                )
-                AND global_item_id IN (
-                    SELECT global_item_id FROM items WHERE url_id = ?
-                )",
-                [property, &url_id.to_string()], // Use global_item_id instead of item_id
+        
+            // Get property ID
+            let property_id: i64 = tx.query_row(
+                "SELECT id FROM properties WHERE name = ?",
+                [property],
+                |row| row.get(0),
             )?;
-
+        
+            // Get all global_item_ids for this URL
+            {
+                let mut stmt = tx.prepare("SELECT global_item_id FROM items WHERE url_id = ?")?;
+                let global_item_ids: Vec<String> = stmt
+                    .query_map([url_id], |row| row.get(0))?
+                    .collect::<Result<_, _>>()?;
+        
+                // Insert into deleted_properties for each global_item_id
+                for global_item_id in global_item_ids {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO deleted_properties (url_id, global_item_id, property_id)
+                        VALUES (?, ?, ?)",
+                        rusqlite::params![url_id, global_item_id, property_id],
+                    )?;
+                }
+            }
+        
             tx.commit()?;
             Ok(())
         }
