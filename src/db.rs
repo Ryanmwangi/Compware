@@ -8,7 +8,7 @@ mod db_impl {
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
     use tokio::sync::Mutex;
-
+    use uuid::Uuid;
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -271,6 +271,22 @@ mod db_impl {
                 e
             })?;
 
+            // Check if the global_item_id column exists
+            let mut stmt = conn.prepare("PRAGMA table_info(items);")?;
+            let columns: Vec<String> = stmt
+                .query_map([], |row| row.get(1))? // Column 1 contains the column names
+                .collect::<Result<_, _>>()?;
+
+            if !columns.contains(&"global_item_id".to_string()) {
+                conn.execute_batch(
+                    "ALTER TABLE items ADD COLUMN global_item_id TEXT;"
+                )
+                .map_err(|e| {
+                    eprintln!("Failed adding global_item_id to items table: {}", e);
+                    e
+                })?;
+            }
+
             // 4. Table for selected properties
             conn.execute_batch(
                 "CREATE TABLE IF NOT EXISTS selected_properties (
@@ -289,11 +305,11 @@ mod db_impl {
             // 5. Junction table for custom properties
             conn.execute_batch(
                 "CREATE TABLE IF NOT EXISTS item_properties (
-                    item_id TEXT NOT NULL,
+                    global_item_id TEXT NOT NULL,
                     property_id INTEGER NOT NULL,
                     value TEXT NOT NULL,
-                    PRIMARY KEY (item_id, property_id),
-                    FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE,
+                    PRIMARY KEY (global_item_id, property_id),
+                    FOREIGN KEY (global_item_id) REFERENCES items(global_item_id) ON DELETE CASCADE,
                     FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE
                 );",
             )
@@ -301,6 +317,23 @@ mod db_impl {
                 eprintln!("Failed creating item_properties table: {}", e);
                 e
             })?;
+
+            // 6. Junction table for deleted properties
+            conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS deleted_properties (
+                url_id INTEGER NOT NULL,
+                global_item_id TEXT NOT NULL,
+                property_id INTEGER NOT NULL,
+                PRIMARY KEY (url_id, global_item_id, property_id),
+                FOREIGN KEY (url_id) REFERENCES urls(id) ON DELETE CASCADE,
+                FOREIGN KEY (global_item_id) REFERENCES items(global_item_id) ON DELETE CASCADE,
+                FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE
+                );",
+            ).map_err(|e| {
+                eprintln!("Failed creating item_properties table: {}", e);
+                e
+            })?;
+
             Ok(())
         }
 
@@ -383,7 +416,8 @@ mod db_impl {
                     SELECT 
                         i.id,
                         i.wikidata_id,
-                        i.item_order
+                        i.item_order,
+                        i.global_item_id 
                     FROM items i
                     WHERE i.url_id = ?
                     ORDER BY i.item_order ASC
@@ -396,25 +430,26 @@ mod db_impl {
                     json_group_object(p.name, ip.value) as custom_properties
                 FROM ordered_items oi
                 LEFT JOIN item_properties ip 
-                    ON oi.id = ip.item_id
+                    ON oi.global_item_id = ip.global_item_id
                     AND ip.property_id NOT IN (
-                        SELECT id FROM properties WHERE name IN ('name', 'description')
+                        SELECT property_id
+                        FROM deleted_properties
+                        WHERE url_id = ? AND global_item_id = oi.global_item_id
                     )
                 LEFT JOIN properties p 
                     ON ip.property_id = p.id
                 LEFT JOIN item_properties name_ip 
-                    ON oi.id = name_ip.item_id
+                    ON oi.global_item_id = name_ip.global_item_id
                     AND name_ip.property_id = (SELECT id FROM properties WHERE name = 'name')
                 LEFT JOIN item_properties desc_ip 
-                    ON oi.id = desc_ip.item_id
+                    ON oi.global_item_id = desc_ip.global_item_id
                     AND desc_ip.property_id = (SELECT id FROM properties WHERE name = 'description')
                 GROUP BY oi.id
                 ORDER BY oi.item_order ASC"
             )?;
         
             // Change from HashMap to Vec to preserve order
-        
-            let rows = stmt.query_map([url_id], |row| {
+            let rows = stmt.query_map([url_id, url_id], |row| {
                   let custom_props_json: String = row.get(4)?;
                   let custom_properties: HashMap<String, String> = serde_json::from_str(&custom_props_json)
                       .unwrap_or_default();
@@ -495,18 +530,36 @@ mod db_impl {
                 |row| row.get(0),
             )?;
 
+            let global_item_id = match tx.query_row(
+                "SELECT ip.global_item_id
+                 FROM item_properties ip
+                 JOIN properties p ON ip.property_id = p.id
+                 WHERE p.name = 'name' AND ip.value = ? LIMIT 1",
+                [&item.name],
+                |row| row.get::<_, String>(0),
+            ) {
+                Ok(id) => id, // Reuse existing global_item_id
+                Err(rusqlite::Error::QueryReturnedNoRows) => {
+                    let new_id = Uuid::new_v4().to_string(); // Generate a new global_item_id
+                    new_id
+                }
+                Err(e) => return Err(e.into()),
+            };
+
             log!("[DB] Upserting item");
             tx.execute(
-                "INSERT INTO items (id, url_id, wikidata_id, item_order)
-                VALUES (?, ?, ?, ?)
+                "INSERT INTO items (id, url_id, wikidata_id, item_order, global_item_id)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     url_id = excluded.url_id,
-                    wikidata_id = excluded.wikidata_id",
+                    wikidata_id = excluded.wikidata_id,
+                    global_item_id = excluded.global_item_id",
                 rusqlite::params![
                     &item.id,
                     url_id,
                     &item.wikidata_id,
-                    max_order + 1
+                    max_order + 1,
+                    &global_item_id
                 ],
             )?;
             log!("[DB] Item upserted successfully");
@@ -523,11 +576,11 @@ mod db_impl {
                 let prop_id = self.get_or_create_property(&mut tx, prop).await?;
                 
                 tx.execute(
-                    "INSERT INTO item_properties (item_id, property_id, value)
+                    "INSERT INTO item_properties (global_item_id, property_id, value)
                     VALUES (?, ?, ?)
-                    ON CONFLICT(item_id, property_id) DO UPDATE SET
+                    ON CONFLICT(global_item_id, property_id) DO UPDATE SET
                         value = excluded.value",
-                    rusqlite::params![&item.id, prop_id, value],
+                    rusqlite::params![&global_item_id, prop_id, value],
                 )?;
             }
 
@@ -538,7 +591,7 @@ mod db_impl {
                     "SELECT p.name, ip.value 
                     FROM item_properties ip
                     JOIN properties p ON ip.property_id = p.id
-                    WHERE ip.item_id = ?",
+                    WHERE ip.global_item_id = ?",
                 )?;
             
                 let mapped_rows = stmt.query_map([&item.id], |row| {
@@ -588,6 +641,11 @@ mod db_impl {
                 "DELETE FROM items WHERE id = ? AND url_id = ?",
                 [item_id, &url_id.to_string()],
             )?;
+        
+            tx.execute(
+                "DELETE FROM item_properties WHERE global_item_id = ?",
+                [item_id],
+            )?;
 
             tx.commit()?;
             Ok(())
@@ -597,23 +655,35 @@ mod db_impl {
         pub async fn delete_property_by_url(&self, url: &str, property: &str) -> Result<(), Error> {
             let mut conn = self.conn.lock().await;
             let tx = conn.transaction()?;
-
+        
             // Get URL ID
             let url_id: i64 =
                 tx.query_row("SELECT id FROM urls WHERE url = ?", [url], |row| row.get(0))?;
-
-            // Delete property from all items in this URL
-            tx.execute(
-                "DELETE FROM item_properties 
-                WHERE property_id IN (
-                    SELECT id FROM properties WHERE name = ?
-                )
-                AND item_id IN (
-                    SELECT id FROM items WHERE url_id = ?
-                )",
-                [property, &url_id.to_string()],
+        
+            // Get property ID
+            let property_id: i64 = tx.query_row(
+                "SELECT id FROM properties WHERE name = ?",
+                [property],
+                |row| row.get(0),
             )?;
-
+        
+            // Get all global_item_ids for this URL
+            {
+                let mut stmt = tx.prepare("SELECT global_item_id FROM items WHERE url_id = ?")?;
+                let global_item_ids: Vec<String> = stmt
+                    .query_map([url_id], |row| row.get(0))?
+                    .collect::<Result<_, _>>()?;
+        
+                // Insert into deleted_properties for each global_item_id
+                for global_item_id in global_item_ids {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO deleted_properties (url_id, global_item_id, property_id)
+                        VALUES (?, ?, ?)",
+                        rusqlite::params![url_id, global_item_id, property_id],
+                    )?;
+                }
+            }
+        
             tx.commit()?;
             Ok(())
         }
