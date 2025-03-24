@@ -1,6 +1,7 @@
-# CompareWare
+# [CompareWare](https://compareware.org/)
 
-CompareWare is an open-source platform for comparing tools (software, hardware, etc.) with structured, crowdsourced data. It combines **Leptos** for a modern, reactive frontend and **Nostr** for decentralized data storage.
+CompareWare is an open-source platform for comparing tools (software, hardware, etc.) with structured, crowdsourced data.
+It combines Rust's **Leptos** for a modern, reactive frontend and **Nostr** for decentralized data storage (TBI).
 
 ## **Features**
 - **Item Management**: Add, view, and manage items with metadata and key-value tags.
@@ -25,7 +26,7 @@ CompareWare is an open-source platform for comparing tools (software, hardware, 
    ```bash
    cargo leptos serve
    ```
-3. Open your browser at [http://localhost:3000](http://localhost:3000)
+3. Open your browser at [localhost:3000](http://localhost:3000)
 
 ## **Database Schema**
 ### Key Concepts
@@ -58,6 +59,23 @@ flowchart LR
     items -->|item_id| item_properties
     properties -->|property_id| item_properties
 ```
+## **Docker Deployment**
+
+### **Prerequisites**
+- Docker installed on your system
+- Docker Compose (usually included with Docker Desktop)
+
+### **Running with Docker**
+1. Clone the repository:
+   ```bash
+   git clone https://forge.ftt.gmbh/ryanmwangi/Compware.git
+   cd compareware
+   ```
+2. Start the container:
+   ```bash
+   docker-compose up -d
+   ```
+3. Access the application at: [http://localhost:3000](http://localhost:3000)
 
 ### **Collaboration**
 We welcome contributions! Here’s how you can help:
