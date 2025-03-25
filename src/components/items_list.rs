@@ -410,10 +410,15 @@ pub fn ItemsList(
                     let mut result = HashMap::new();
                     if let Some(bindings) = data["results"]["bindings"].as_array() {
                         for binding in bindings {
-                            let prop_label = binding["propLabel"]["value"].as_str().unwrap_or("").to_string();
-                            let prop_label = prop_label.replace("http://www.wikidata.org/prop/", "");
+                            let prop = binding["propLabel"]["value"].as_str().unwrap_or("").to_string();
+                            let prop_id = prop.replace("http://www.wikidata.org/prop/", "");
                             let value_label = binding["valueLabel"]["value"].as_str().unwrap_or("").to_string();
-                            result.insert(prop_label, value_label);
+                            
+                            // Fetch property labels
+                            let prop_label_map = fetch_property_labels(vec![prop_id]).await;
+                            if let Some(prop_label) = prop_label_map.values().next() {
+                                result.insert(prop_label.clone(), value_label);
+                            }
                             log!("result: {:?}", result);
                         }
                     }
@@ -944,7 +949,7 @@ pub fn ItemsList(
                         property_labels.into_iter().map(|(property, label)| {
                             let property_clone = property.clone();
                             view! {
-                                <option value={property}>{ format!("{} - {}", property_clone, label) }</option>
+                                <option value={property}>{ format!("{}", property_clone) }</option>
                             }
                         }).collect::<Vec<_>>()
                     }}
