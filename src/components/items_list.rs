@@ -381,7 +381,7 @@ pub fn ItemsList(
     };
 
     //function to fetch properties
-    async fn fetch_item_properties(wikidata_id: &str) -> HashMap<String, String> {
+    async fn fetch_item_properties(wikidata_id: &str, set_property_labels: WriteSignal<HashMap<String, String>>) -> HashMap<String, String> {
         let sparql_query = format!(
             r#"
             SELECT ?propLabel ?value ?valueLabel WHERE {{
@@ -416,6 +416,12 @@ pub fn ItemsList(
                             
                             // Fetch property labels
                             let prop_label_map = fetch_property_labels(vec![prop_id]).await;
+                            set_property_labels.update(|labels_map| {
+                                for (key, value) in &prop_label_map {
+                                    labels_map.insert(key.clone(), value.clone());
+                                }
+                            });
+
                             if let Some(prop_label) = prop_label_map.values().next() {
                                 result.insert(prop_label.clone(), value_label);
                             }
@@ -520,6 +526,7 @@ pub fn ItemsList(
     let add_property = {
         let current_url = Rc::clone(&current_url);
         let set_items = set_items.clone();
+        let set_property_labels = set_property_labels.clone();
         Arc::new(move |property: String| {
         // Normalize the property ID
         let normalized_property = property.replace("http://www.wikidata.org/prop/", "");
@@ -586,18 +593,10 @@ pub fn ItemsList(
                     }
                 });
 
-                // Fetch the property label
-                let property_id = normalized_property.clone();
-                spawn_local(async move {
-                    let labels = fetch_property_labels(vec![property_id.clone()]).await;
-                    log!("Fetched labels: {:?}", labels);
-                    set_property_labels.update(|labels_map| {
-                        for (key, value) in labels {
-                            log!("Inserting label: {} -> {}", key, value);
-                            labels_map.insert(key, value);
-                        }
-                    });
-                });
+                // Use the property label from the property_labels signal
+                let property_label = property_labels.get().get(&normalized_property).cloned().unwrap_or_else(|| normalized_property.clone());
+                log!("Added property with label: {}", property_label);
+
             }
         });
         // Fetch the relevant value for each item and populate the corresponding cells
@@ -609,7 +608,7 @@ pub fn ItemsList(
                     let set_property_labels = set_property_labels.clone();
                     let property_clone = property.clone();
                     spawn_local(async move {
-                        let properties = fetch_item_properties(&wikidata_id).await;
+                        let properties = fetch_item_properties(&wikidata_id, set_property_labels.clone()).await;
                         // Update fetched properties and property labels
                         set_fetched_properties.update(|fp| {
                             fp.insert(wikidata_id.clone(), properties.clone());
@@ -651,7 +650,7 @@ pub fn ItemsList(
                             if let Some(wikidata_id) = &item.wikidata_id {
                                 let wikidata_id = wikidata_id.clone();
                                 spawn_local(async move {
-                                    let properties = fetch_item_properties(&wikidata_id).await;
+                                    let properties = fetch_item_properties(&wikidata_id, set_property_labels.clone()).await;
                                     log!("Fetched properties for index {}: {:?}", index, properties);
                                 });
                             }
@@ -800,7 +799,7 @@ pub fn ItemsList(
                                                                                         // Fetch additional properties from Wikidata
                                                                                         let wikidata_id = id.clone();
                                                                                         spawn_local(async move {
-                                                                                            let properties = fetch_item_properties(&wikidata_id).await;
+                                                                                            let properties = fetch_item_properties(&wikidata_id, set_property_labels.clone()).await;
                                                                                             // log!("Fetched properties for Wikidata ID {}: {:?}", wikidata_id, properties);
                                                                                             
                                                                                             // Populate the custom properties for the new item
