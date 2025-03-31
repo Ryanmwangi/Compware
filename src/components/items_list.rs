@@ -397,6 +397,7 @@ pub fn ItemsList(
         property_cache: ReadSignal<HashMap<String, HashMap<String, String>>>,
         set_property_cache: WriteSignal<HashMap<String, HashMap<String, String>>>,
         property_labels: ReadSignal<HashMap<String, String>>,
+        set_is_fetching_labels: WriteSignal<bool>, 
     ) -> HashMap<String, String> {
 
         // Check cache first
@@ -453,6 +454,7 @@ pub fn ItemsList(
                         .collect();
 
                     if !missing_ids.is_empty() {
+                        
                         let new_labels = fetch_property_labels(
                             missing_ids,
                             set_property_labels.clone(),
@@ -696,6 +698,7 @@ pub fn ItemsList(
                                 property_cache.clone(),
                                 set_property_cache.clone(),
                                 property_labels.clone(),
+                                set_is_fetching_labels.clone()
                             )
                             .await;
                             // Update fetched properties and property labels
@@ -746,6 +749,7 @@ pub fn ItemsList(
                                             property_cache.clone(),
                                             set_property_cache.clone(),
                                             property_labels.clone(),
+                                            set_is_fetching_labels.clone()
                                         )
                                         .await;
                                     log!("Fetched properties for index {}: {:?}", index, properties);
@@ -897,7 +901,7 @@ pub fn ItemsList(
                                                                                         // Fetch additional properties from Wikidata
                                                                                         let wikidata_id = id.clone();
                                                                                         spawn_local(async move {
-                                                                                            let properties = fetch_item_properties(&wikidata_id, set_property_labels.clone(), property_cache.clone(), set_property_cache.clone(), property_labels.clone()).await;
+                                                                                            let properties = fetch_item_properties(&wikidata_id, set_property_labels.clone(), property_cache.clone(), set_property_cache.clone(), property_labels.clone(),set_is_fetching_labels.clone()).await;
                                                                                             // log!("Fetched properties for Wikidata ID {}: {:?}", wikidata_id, properties);
 
                                                                                             // Populate the custom properties for the new item
