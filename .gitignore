@@ -19,3 +19,4 @@ playwright/.cache/
 
 # Ignore database file
 compareware.db
+.qodo

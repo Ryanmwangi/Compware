@@ -59,6 +59,28 @@ flowchart LR
     items -->|item_id| item_properties
     properties -->|property_id| item_properties
 ```
+
+### Properties data flow
+```mermaid
+sequenceDiagram
+    participant User
+    participant App as Application
+    participant Wikidata
+
+    User->>App: Enters search
+    App->>Wikidata: fetch_wikidata_suggestions()
+    Wikidata-->>App: Return suggestions
+    App->>User: Show suggestions
+    
+    User->>App: Selects item
+    App->>Wikidata: fetch_item_properties()
+    Wikidata-->>App: Return properties (IDs + values)
+    
+    App->>Wikidata: fetch_property_labels()
+    Wikidata-->>App: Return labels
+    App->>App: Combine labels + properties
+    App->>User: Show labeled properties
+```
 ## **Docker Deployment**
 
 ### **Prerequisites**
