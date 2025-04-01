@@ -398,12 +398,16 @@ pub fn ItemsList(
 
         let sparql_query = format!(
             r#"
-            SELECT ?propLabel ?value ?valueLabel WHERE {{
+            SELECT ?prop ?propLabel ?value ?valueLabel WHERE {{
               wd:{} ?prop ?statement.
               ?statement ?ps ?value.
               ?property wikibase:claim ?prop.
               ?property wikibase:statementProperty ?ps.
-              SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
+              SERVICE wikibase:label {{ 
+                bd:serviceParam wikibase:language "en". 
+                ?prop rdfs:label ?propLabel.
+                ?value rdfs:label ?valueLabel.
+              }}
             }}
             "#,
             wikidata_id
@@ -454,28 +458,24 @@ pub fn ItemsList(
                     // Second pass: build results
                     if let Some(bindings) = data["results"]["bindings"].as_array() {
                         for binding in bindings {
-                            if let (Some(prop_uri), Some(value_label)) = (
-                                binding["prop"]["value"].as_str(),
-                                binding["valueLabel"]["value"].as_str()
-                            ) {
-                                // Extract property ID from URI (e.g., "http://www.wikidata.org/prop/P123")
+                            let prop_label = binding["propLabel"]["value"].as_str().unwrap_or_default();
+                            let value = binding["valueLabel"]["value"]
+                                .as_str()
+                                .or_else(|| binding["value"]["value"].as_str())
+                                .unwrap_or_default();
+                            
+                            if let Some(prop_uri) = binding["prop"]["value"].as_str() {
                                 let prop_id = prop_uri.split('/').last().unwrap_or_default().to_string();
+                                result.insert(
+                                    prop_id.clone(),
+                                    value.to_string()
+                                );
                                 
-                                // Get the label from property_labels signal
-                                if let Some(label) = property_labels.get().get(&prop_id).cloned() {
-                                    result.insert(
-                                        prop_id.clone(),
-                                        format!("{}: {}", 
-                                            property_labels.get().get(&prop_id).cloned().unwrap_or(prop_id.clone()),
-                                            value_label
-                                        )
-                                    );
-                                    
-                                    // Ensure the label is stored in property_labels
-                                    set_property_labels.update(|labels| {
-                                        labels.entry(prop_id.clone()).or_insert_with(|| label.clone());
-                                    });
-                                }
+                                // Update labels if missing
+                                set_property_labels.update(|labels| {
+                                    labels.entry(prop_id.clone())
+                                        .or_insert(prop_label.to_string());
+                                });
                             }
                         }
                     }
