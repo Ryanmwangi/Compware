@@ -814,108 +814,92 @@ pub fn ItemsList(
                                             <td>
                                             {match property {
                                                 "Name" => view! {
-                                                    <div class="editable-cell">
+                                                    <div class="search-container">
                                                         <EditableCell
                                                             value=item.name.clone()
                                                             on_input=move |value| {
                                                                 update_item_clone(index, "name", value.clone());
-                                                                fetch_wikidata_suggestions(format!("name-{}", index), value);
+                                                                // Debounce with proper async handling
+                                                                spawn_local({
+                                                                    let key = format!("name-{}", index);
+                                                                    let value = value.clone();
+                                                                    let fetch = fetch_wikidata_suggestions.clone();
+                                                                    async move {
+                                                                        gloo_timers::future::sleep(std::time::Duration::from_millis(300)).await;
+                                                                        fetch(key, value);
+                                                                    }
+                                                                });
                                                             }
                                                             key=Arc::new(format!("name-{}", index))
                                                             focused_cell=focused_cell
                                                             set_focused_cell=set_focused_cell.clone()
                                                             on_focus=Some(Callback::new(move |_| {
-                                                                log!("Input focused, showing suggestions");
                                                                 set_show_suggestions.update(|suggestions| {
                                                                     suggestions.insert(format!("name-{}", index), true);
                                                                 });
                                                             }))
                                                             on_blur=Some(Callback::new(move |_| {
-                                                                log!("Input blurred, delaying hiding suggestions");
                                                                 spawn_local(async move {
-                                                                    gloo_timers::future::sleep(std::time::Duration::from_millis(500)).await;
-                                                                    log!("Hiding suggestions after delay");
                                                                     set_show_suggestions.update(|suggestions| {
                                                                         suggestions.insert(format!("name-{}", index), false);
                                                                     });
                                                                 });
                                                             }))
-                                                            input_type=InputType::Text
+                                                            input_type=InputType::Search
                                                         />
-                                                        <button class="search-icon" on:click=move |_| {
-                                                            log!("Search icon clicked, showing suggestions");
-                                                            set_show_suggestions.update(|suggestions| {
-                                                                suggestions.insert(format!("name-{}", index), true);
-                                                            });
-                                                        }> 
-                                                            <i class="fas fa-search"></i> Search Wiki
-                                                        </button>
                                                         {move || {
                                                             if *show_suggestions.get().get(&format!("name-{}", index)).unwrap_or(&false) {
-                                                                log!("Rendering suggestions list");
                                                                 view! {
-                                                                        <ul class="editable-cell-suggestions">
-                                                                                {move || {
-                                                                                    let suggestions = wikidata_suggestions.get()
-                                                                                        .get(&format!("name-{}", index))
-                                                                                        .cloned()
-                                                                                        .unwrap_or_default();
-                                                                                    log!("Suggestions for cell {}: {:?}", index, suggestions);
-                                                                                    suggestions.into_iter().map(|suggestion| {
-                                                                                        let label_for_click = suggestion.label.clone();
-                                                                                        let label_for_display = suggestion.label.clone();
-                                                                                        let description_for_click = suggestion.description.clone().unwrap_or_default();
-                                                                                        let description_for_display = suggestion.description.clone().unwrap_or_default();
-                                                                                        let id = suggestion.id.clone();                                                                                    
-                                                                                view! {
-                                                                                    <li class="editable-cell-suggestions-li" on:click=move |_| {
-                                                                                        // Update item with basic suggestion details
-                                                                                        set_items.update(|items| {
-                                                                                            if let Some(item) = items.get_mut(index) {
-                                                                                                item.description = description_for_click.clone();
-                                                                                                item.wikidata_id = Some(id.clone());
-                                                                                                item.name = label_for_click.clone();
-                                                                                            }
-                                                                                        });
+                                                                    <div class="suggestions-container">
+                                                                        <ul class="suggestions-list">
+                                                                            {move || {
+                                                                                let suggestions = wikidata_suggestions.get()
+                                                                                    .get(&format!("name-{}", index))
+                                                                                    .cloned()
+                                                                                    .unwrap_or_default();
+                                                                                suggestions.into_iter().map(|suggestion| {
+                                                                                    let label = suggestion.label.clone();
+                                                                                    let description = suggestion.description.clone().unwrap_or_default();
+                                                                                    let id = suggestion.id.clone();
 
-                                                                                        // Fetch additional properties from Wikidata
-                                                                                        let wikidata_id = id.clone();
-                                                                                        spawn_local(async move {
-                                                                                            let properties = fetch_item_properties(&wikidata_id, set_property_labels.clone(), property_cache.clone(), set_property_cache.clone(), property_labels.clone()).await;
-                                                                                            // log!("Fetched properties for Wikidata ID {}: {:?}", wikidata_id, properties);
-                                                                                            
-                                                                                            // Populate the custom properties for the new item
-                                                                                            set_items.update(|items| {
-                                                                                                if let Some(item) = items.iter_mut().find(|item| item.wikidata_id.as_ref() == Some(&wikidata_id)) {
-                                                                                                    for (property, value) in properties {
-                                                                                                        item.custom_properties.insert(property, value);
+                                                                                    // Clone values for the closure
+                                                                                    let closure_label = label.clone();
+                                                                                    let closure_description = description.clone();
+                                                                                    let closure_id = id.clone();
+
+                                                                                    view! {
+                                                                                        <li
+                                                                                            class="suggestion-item"
+                                                                                            on:click=move |_| {
+                                                                                                set_items.update(|items| {
+                                                                                                    if let Some(item) = items.get_mut(index) {
+                                                                                                        item.name = closure_label.clone();
+                                                                                                        item.description = closure_description.clone();
+                                                                                                        item.wikidata_id = Some(closure_id.clone());
                                                                                                     }
-                                                                                                }
-                                                                                            });
-                                                                                        });
-
-                                                                                        // Hide the suggestion list
-                                                                                        set_show_suggestions.update(|suggestions| {
-                                                                                            suggestions.insert(format!("name-{}", index), false);
-                                                                                            log!("Updated show_suggestions: {:?}", suggestions);
-                                                                                        });
-                                                                                    }>
-                                                                                        { format!("{} - {}", label_for_display, description_for_display) }
-                                                                                    </li>
-                                                                                }
-                                                                                    }).collect::<Vec<_>>()
-                                                                                }}
+                                                                                                });
+                                                                                                set_show_suggestions.update(|s| {
+                                                                                                    s.insert(format!("name-{}", index), false);
+                                                                                                });
+                                                                                            }
+                                                                                        >
+                                                                                            <div class="suggestion-title">{label}</div>
+                                                                                            <div class="suggestion-description">{description}</div>
+                                                                                            // <div class="suggestion-id">{id}</div>
+                                                                                        </li>
+                                                                                    }
+                                                                                }).collect::<Vec<_>>()
+                                                                            }}
                                                                         </ul>
+                                                                    </div>
                                                                 }
                                                             } else {
-                                                                log!("Suggestions list hidden");
-                                                                view! {
-                                                                    <ul></ul>
-                                                                }
+                                                                view! { <div></div> }
                                                             }
                                                         }}
                                                     </div>
                                                 }.into_view(),
+                                            
                                                 "Description" => view! {
                                                 <EditableCell
                                                     value=item.description.clone()

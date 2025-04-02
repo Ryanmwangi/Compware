@@ -22,17 +22,19 @@ pub fn EditableCell(
         let new_value = match input_type_clone {
             InputType::Text => event_target_value(&e),
             InputType::TextArea => event_target_value(&e),
+            InputType::Search => event_target_value(&e),
         };
         log!("Input event: {}", new_value);
-        set_local_value.set(new_value);
+        set_local_value.set(new_value.clone());
+        on_input(new_value);
     };
 
-    // Commit the input value on blur or enter
-    let commit_input = move || {
-        let value = local_value.get();
-        log!("Committing input: {}", value);
-        on_input(value);
-    };
+    // // Commit the input value on blur or enter
+    // let commit_input = move || {
+    //     let value = local_value.get();
+    //     log!("Committing input: {}", value);
+    //     on_input(value);
+    // };
 
     // Focus handling
     let handle_focus = {
@@ -49,7 +51,7 @@ pub fn EditableCell(
     let handle_blur = move |_| {
         log!("Focus lost");
         set_focused_cell.set(None);
-        commit_input();
+        // commit_input();
         if let Some(on_blur) = &on_blur {
             on_blur.call(());
         }
@@ -58,10 +60,23 @@ pub fn EditableCell(
     // Update input field value when focused cell changes
     create_effect(move |_| {
         if focused_cell.get().as_deref() == Some(key.as_str()) {
-            log!("Setting focus for key: {}", key);
-            if let Some(input) = input_ref.get() {
-                let _ = input.focus();
-            }
+            log!("Persisting focus for key: {}", key);
+            let input_ref = input_ref.clone();
+            let key_clone = key.clone();
+            
+            // Use requestAnimationFrame for better focus timing
+            spawn_local(async move {
+                for _ in 0..3 {  // Retry up to 3 times
+                    gloo_timers::future::sleep(std::time::Duration::from_millis(10)).await;
+                    if let Some(input) = input_ref.get() {
+                        let _ = input.focus();
+                        if document().active_element().as_ref() == Some(input.as_ref() as &web_sys::Element) {
+                            break;
+                        }
+                    }
+                    log!("Focus retry for {}", key_clone);
+                }
+            });
         }
     });
 
@@ -88,6 +103,17 @@ pub fn EditableCell(
                         node_ref=textarea_ref
                         class="editable-cell-input"
                     />
+                }.into_view(),
+                InputType::Search => view! {
+                    <input
+                        type="search"
+                        prop:value=move || local_value.get()
+                        on:input=handle_input
+                        on:focus=handle_focus
+                        on:blur=handle_blur
+                        node_ref=input_ref
+                        class="editable-cell-input"
+                    />
                 }.into_view()
             }}
         </div>
@@ -98,4 +124,5 @@ pub fn EditableCell(
 pub enum InputType {
     Text,
     TextArea,
+    Search
 }
