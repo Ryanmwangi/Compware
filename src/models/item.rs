@@ -10,3 +10,10 @@ pub struct Item {
     pub wikidata_id: Option<String>,
     pub custom_properties: HashMap<String, String>,
 }
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct WikidataSuggestion {
+    pub id: String,
+    pub label: String,
+    pub description: Option<String>,
+}
