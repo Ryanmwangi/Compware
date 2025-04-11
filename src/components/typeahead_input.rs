@@ -44,9 +44,65 @@ pub fn TypeaheadInput(
     });
 
     view! {
+        <style>
+            {r#"
+            .typeahead.tt-input {{
+                background: transparent !important;
+            }}
+
+            .tt-menu {{
+                width: 100% !important;
+                background: white;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                box-shadow: 0 5px 10px rgba(0,0,0,.2);
+                max-height: 300px;
+                overflow-y: auto;
+                z-index: 1000 !important;
+            }}
+
+            .tt-dataset-suggestions {{
+                padding: 8px 0;
+            }}
+
+            .suggestion-item * {{
+                pointer-events: none;  /* Prevent element interception */
+                white-space: nowrap;   /* Prevent text wrapping */
+                overflow: hidden;      /* Hide overflow */
+                text-overflow: ellipsis; /* Add ellipsis for long text */
+            }}
+
+            .suggestion-item {{
+                padding: 8px 15px;
+                border-bottom: 1px solid #eee;
+            }}
+
+            .suggestion-item:hover {{
+                background-color: #f8f9fa;
+                cursor: pointer;
+            }}
+
+            .label {{
+                font-weight: 500;
+                color: #333;
+            }}
+
+            .description {{
+                font-size: 0.9em;
+                color: #666;
+                margin-top: 2px;
+            }}
+
+            .empty-suggestion {{
+                padding: 8px 15px;
+                color: #999;
+            }}
+        "#}
+        </style>
+
         <input
             type="text"
-            class="typeahead"
+            class="typeahead-input"
             prop:value=value
             node_ref=node_ref
             on:focus=move |_| log!("[FOCUS] Name input focused")
@@ -56,6 +112,15 @@ pub fn TypeaheadInput(
                 log!("[INPUT] Value changed: {}", value);
                 let _ = js_sys::eval("console.log('jQuery version:', $.fn.jquery)");
                 let _ = js_sys::eval("console.log('Typeahead version:', $.fn.typeahead ? 'loaded' : 'missing')");
+                // Add debug check for Typeahead instance
+                if let Some(input) = node_ref.get() {
+                    let dom_input: web_sys::HtmlInputElement = input.unchecked_into();
+                    let id = dom_input.id();
+                    let _ = js_sys::eval(&format!(
+                        "console.log('Typeahead instance for #{id}:', $('#{id}').data('ttTypeahead'))",
+                        id = id
+                    ));
+                }
             }
         />
     }
@@ -83,13 +148,29 @@ fn initialize_bloodhound(fetch: Callback<String, Vec<WikidataSuggestion>>) -> Js
         let query_str = query.as_string().unwrap_or_default();
         log!("[BLOODHOUND] Fetching suggestions for: {}", query_str);
         let suggestions = fetch.call(query_str.clone());
-        log!("[BLOODHOUND] Received {} suggestions", suggestions.len());
-
+        
         let array = Array::new();
         for suggestion in &suggestions {
             let obj = Object::new();
-            Reflect::set(&obj, &"label".into(), &suggestion.label.clone().into()).unwrap_or_default();
-            Reflect::set(&obj, &"value".into(), &suggestion.id.clone().into()).unwrap_or_default();
+            
+            // Create nested display structure matching API response
+            let display = Object::new();
+            
+            let label_obj = Object::new();
+            Reflect::set(&label_obj, &"value".into(), &suggestion.label.clone().into()).unwrap();
+            Reflect::set(&display, &"label".into(), &label_obj).unwrap();
+            
+            let desc_obj = Object::new();
+            Reflect::set(&desc_obj, &"value".into(), &suggestion.description.clone().into()).unwrap();
+            Reflect::set(&display, &"description".into(), &desc_obj).unwrap();
+            
+            Reflect::set(&obj, &"display".into(), &display).unwrap();
+            
+            // Add flat fields as fallback
+            Reflect::set(&obj, &"label".into(), &suggestion.label.clone().into()).unwrap();
+            Reflect::set(&obj, &"description".into(), &suggestion.description.clone().into()).unwrap();
+            
+            log!("[BLOODHOUND] Constructed suggestion object: {:?}", obj);
             array.push(&obj);
         }
         let _ = sync.call1(&JsValue::NULL, &array);
@@ -117,6 +198,16 @@ fn initialize_bloodhound(fetch: Callback<String, Vec<WikidataSuggestion>>) -> Js
         &"rateLimitWait".into(),
         &JsValue::from(300)
     ).unwrap();
+
+    // Response filter to prevent HTML parsing errors
+    let filter_fn = js_sys::Function::new_no_args(
+        "return function(response) { return response || []; }"
+    );
+    Reflect::set(
+        &remote_config,
+        &"filter".into(),
+        &filter_fn
+    ).unwrap();
     
     // Wildcard function
     Reflect::set(
@@ -128,9 +219,14 @@ fn initialize_bloodhound(fetch: Callback<String, Vec<WikidataSuggestion>>) -> Js
     Reflect::set(&bloodhound_options, &"remote".into(), &remote_config).unwrap();
 
     // Tokenizer functions from Bloodhound
-    let tokenizer = js_sys::eval(r#"Bloodhound.tokenizers.whitespace"#)
-        .expect("Should get whitespace tokenizer");
-
+    let tokenizer = js_sys::Function::new_no_args(
+        r#"
+        return function(query) {
+            return query.trim().split(/\s+/);
+        }
+        "#
+    );
+    
     Reflect::set(
         &bloodhound_options, 
         &"datumTokenizer".into(), 
@@ -168,20 +264,7 @@ fn initialize_typeahead(
     let input_id = format!("typeahead-{}", uuid::Uuid::new_v4());
     input.set_id(&input_id);
 
-    let dataset = Object::new();
-    let bloodhound_ref = bloodhound.unchecked_ref::<Bloodhound>();
-    
-    Reflect::set(&dataset, &"source".into(), &bloodhound_ref.tt_adapter()).unwrap();
-    Reflect::set(&dataset, &"display".into(), &"label".into()).unwrap();
-    Reflect::set(&dataset, &"limit".into(), &JsValue::from(10)).unwrap();
-
-    let templates = Object::new();
-    let suggestion_fn = js_sys::Function::new_no_args(
-        "return '<div class=\"suggestion-item\">' + data.label + '</div>';"
-    );
-    Reflect::set(&templates, &"suggestion".into(), &suggestion_fn.into()).unwrap();
-    Reflect::set(&dataset, &"templates".into(), &templates).unwrap();
-
+    // Create selection handler closure
     let closure = Closure::wrap(Box::new(move |_event: web_sys::Event, suggestion: JsValue| {
         log!("[TYPEAHEAD] Selection made");
         if let Ok(data) = suggestion.into_serde::<WikidataSuggestion>() {
@@ -194,6 +277,7 @@ fn initialize_typeahead(
         }
     }) as Box<dyn FnMut(web_sys::Event, JsValue)>);
     
+    // Register global handler
     let handler_name = format!("handler_{}", input_id);
     js_sys::Reflect::set(
         &js_sys::global(),
@@ -202,7 +286,7 @@ fn initialize_typeahead(
     ).unwrap();
     closure.forget();
 
-    // Corrected initialization script using bracket notation for handler
+    // Initialization script
     let init_script = format!(
         r#"
         console.log('[JS] Starting Typeahead init for #{id}');
@@ -216,26 +300,45 @@ fn initialize_typeahead(
                 }},
                 {{
                     name: 'suggestions',
-                    source: bloodhound.ttAdapter(),
                     display: 'label',
+                    source: bloodhound.ttAdapter(),
                     templates: {{
                         suggestion: function(data) {{
-                            console.log('[JS] Rendering suggestion', data);
-                            return $('<div>').text(data.label);
-                        }}
+                            // Handle nested Wikidata structure
+                            var label = data.label || '';
+                            var description = data.description || '';
+                            
+                            // If nested display exists, use those values
+                            if (data.display) {{
+                                label = data.display.label?.value || label;
+                                description = data.display.description?.value || description;
+                            }}
+                            
+                            return $('<div>')
+                                .addClass('suggestion-item')
+                                .append($('<div>').addClass('label').text(label))
+                                .append($('<div>').addClass('description').text(description));
+                        }},
+                        empty: $('<div>').addClass('empty-suggestion').text('No matches found')
                     }}
                 }}
-            ).on('typeahead:select', function(ev, suggestion) {{
-                console.log('[JS] Selection event received');
+            )
+            .on('typeahead:asyncreceive', function(ev, dataset, suggestions) {{
+                console.log('[JS] Received suggestions:', suggestions);
+                if (suggestions && suggestions.length > 0) {{
+                    $(this).data('ttTypeahead').dropdown.open();
+                }}
+            }})
+            .on('typeahead:select', function(ev, suggestion) {{
+                console.log('[JS] Selection data:', JSON.stringify(suggestion, null, 2));
                 window['{handler}'](ev, suggestion);
             }});
-            console.log('[JS] Typeahead initialized successfully');
         }} catch (e) {{
             console.error('[JS] Typeahead init error:', e);
         }}
         "#,
         id = input_id,
-        handler = handler_name.replace('-', "_") // Replace hyphens to avoid JS issues
+        handler = handler_name.replace('-', "_")
     );
 
     log!("[RUST] Initialization script: {}", init_script);
