@@ -112,15 +112,6 @@ pub fn TypeaheadInput(
                 log!("[INPUT] Value changed: {}", value);
                 let _ = js_sys::eval("console.log('jQuery version:', $.fn.jquery)");
                 let _ = js_sys::eval("console.log('Typeahead version:', $.fn.typeahead ? 'loaded' : 'missing')");
-                // Add debug check for Typeahead instance
-                if let Some(input) = node_ref.get() {
-                    let dom_input: web_sys::HtmlInputElement = input.unchecked_into();
-                    let id = dom_input.id();
-                    let _ = js_sys::eval(&format!(
-                        "console.log('Typeahead instance for #{id}:', $('#{id}').data('ttTypeahead'))",
-                        id = id
-                    ));
-                }
             }
         />
     }
