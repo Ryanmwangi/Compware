@@ -50,7 +50,7 @@ COPY assets /app/assets
 
 # Configure container, expose port and set entrypoint
 WORKDIR /app 
-EXPOSE 3000
-ENV LEPTOS_SITE_ADDR=0.0.0.0:3000
+EXPOSE 3004
+ENV LEPTOS_SITE_ADDR=0.0.0.0:3004
 ENV LEPTOS_SITE_ROOT="site"
 CMD ["./compareware"]

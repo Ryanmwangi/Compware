@@ -26,7 +26,7 @@ It combines Rust's **Leptos** for a modern, reactive frontend and **Nostr** for 
    ```bash
    cargo leptos serve
    ```
-3. Open your browser at [localhost:3000](http://localhost:3000)
+3. Open your browser at [localhost:3004](http://localhost:3004)
 
 ## **Database Schema**
 ### Key Concepts
@@ -97,7 +97,7 @@ sequenceDiagram
    ```bash
    docker-compose up -d
    ```
-3. Access the application at: [http://localhost:3000](http://localhost:3000)
+3. Access the application at: [http://localhost:3004](http://localhost:3004)
 
 ### **Collaboration**
 We welcome contributions! Here’s how you can help:
