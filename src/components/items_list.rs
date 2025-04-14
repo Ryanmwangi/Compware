@@ -828,8 +828,8 @@ pub fn ItemsList(
                                                         on_select=Callback::new(move |suggestion: WikidataSuggestion| {
                                                             set_items.update(|items| {
                                                                 if let Some(item) = items.get_mut(index) {
-                                                                    item.name = suggestion.label.clone();
-                                                                    item.description = suggestion.description.clone().unwrap_or_default();
+                                                                    item.name = suggestion.display.label.value.clone();
+                                                                    item.description = suggestion.display.description.value.clone();
                                                                     item.wikidata_id = Some(suggestion.id.clone());
                                                                     
                                                                     // Automatically fetch properties when Wikidata ID is set

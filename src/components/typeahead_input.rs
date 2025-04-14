@@ -144,26 +144,29 @@ fn initialize_bloodhound(fetch: Callback<String, Vec<WikidataSuggestion>>) -> Js
         for suggestion in &suggestions {
             let obj = Object::new();
             
-            // Create nested display structure matching API response
-            let display = Object::new();
-            
-            let label_obj = Object::new();
-            Reflect::set(&label_obj, &"value".into(), &suggestion.label.clone().into()).unwrap();
-            Reflect::set(&display, &"label".into(), &label_obj).unwrap();
-            
-            let desc_obj = Object::new();
-            Reflect::set(&desc_obj, &"value".into(), &suggestion.description.clone().into()).unwrap();
-            Reflect::set(&display, &"description".into(), &desc_obj).unwrap();
-            
-            Reflect::set(&obj, &"display".into(), &display).unwrap();
-            
-            // Add flat fields as fallback
+            // Set flattened structure for Typeahead compatibility
+            Reflect::set(&obj, &"id".into(), &suggestion.id.clone().into()).unwrap();
             Reflect::set(&obj, &"label".into(), &suggestion.label.clone().into()).unwrap();
             Reflect::set(&obj, &"description".into(), &suggestion.description.clone().into()).unwrap();
             
-            log!("[BLOODHOUND] Constructed suggestion object: {:?}", obj);
+            // Flatten display values for direct access
+            Reflect::set(
+                &obj, 
+                &"displayLabel".into(), 
+                &suggestion.display.label.value.clone().into()
+            ).unwrap();
+            
+            Reflect::set(
+                &obj,
+                &"displayDescription".into(),
+                &suggestion.display.description.value.clone().into()
+            ).unwrap();
+
             array.push(&obj);
         }
+
+        log!("[BLOODHOUND] suggestions: {:?}", array);
+        
         let _ = sync.call1(&JsValue::NULL, &array);
     }) as Box<dyn Fn(JsValue, Function)>);
 
@@ -259,6 +262,7 @@ fn initialize_typeahead(
     let closure = Closure::wrap(Box::new(move |_event: web_sys::Event, suggestion: JsValue| {
         log!("[TYPEAHEAD] Selection made");
         if let Ok(data) = suggestion.into_serde::<WikidataSuggestion>() {
+            log!("[TYPEAHEAD] Selected suggestion: {:?}", data);
             on_select.call(data.clone());
             if let Some(input) = node_ref.get() {
                 input.set_value(&data.label);
@@ -267,7 +271,7 @@ fn initialize_typeahead(
             log!("[ERROR] Failed to deserialize suggestion");
         }
     }) as Box<dyn FnMut(web_sys::Event, JsValue)>);
-    
+
     // Register global handler
     let handler_name = format!("handler_{}", input_id);
     js_sys::Reflect::set(
@@ -277,7 +281,7 @@ fn initialize_typeahead(
     ).unwrap();
     closure.forget();
 
-    // Initialization script
+    // Initialization script with enhanced logging
     let init_script = format!(
         r#"
         console.log('[JS] Starting Typeahead init for #{id}');
@@ -291,39 +295,52 @@ fn initialize_typeahead(
                 }},
                 {{
                     name: 'suggestions',
-                    display: 'label',
-                    source: bloodhound.ttAdapter(),
+                    display: function(data) {{
+                        console.log('[JS] Display function called with data:', data);
+                        return data.display?.label?.value || data.label || '';
+                    }},
+                    source: function(query, syncResults) {{
+                        console.log('[JS] Bloodhound source called with query:', query);
+                        var bloodhound = window.bloodhoundInstance;
+                        bloodhound.ttAdapter()(query, function(suggestions) {{
+                            console.log('[JS] Suggestions from Bloodhound before syncResults:', suggestions);
+                            if (Array.isArray(suggestions)) {{
+                                console.log('[JS] Passing suggestions to syncResults:', suggestions);
+                                syncResults(suggestions);
+                            }} else {{
+                                console.warn('[JS] Suggestions are not an array:', suggestions);
+                            }}
+                        }});
+                    }},
                     templates: {{
                         suggestion: function(data) {{
-                            // Handle nested Wikidata structure
-                            var label = data.label || '';
-                            var description = data.description || '';
-                            
-                            // If nested display exists, use those values
-                            if (data.display) {{
-                                label = data.display.label?.value || label;
-                                description = data.display.description?.value || description;
-                            }}
-                            
+                        console.log('[JS] Rendering suggestion:', data);
                             return $('<div>')
                                 .addClass('suggestion-item')
-                                .append($('<div>').addClass('label').text(label))
-                                .append($('<div>').addClass('description').text(description));
+                                .append($('<div>').addClass('label').text(data.displayLabel || data.label))
+                                .append($('<div>').addClass('description').text(data.displayDescription || data.description));
                         }},
-                        empty: $('<div>').addClass('empty-suggestion').text('No matches found')
+                        empty: function() {{
+                            console.log('[JS] No suggestions found');
+                            return $('<div>').addClass('empty-suggestion').text('No matches found');
+                        }}
                     }}
                 }}
             )
             .on('typeahead:asyncreceive', function(ev, dataset, suggestions) {{
-                console.log('[JS] Received suggestions:', suggestions);
+                console.log('[JS] Received suggestions in typeahead:asyncreceive:', suggestions);
                 if (suggestions && suggestions.length > 0) {{
+                    console.log('[JS] Suggestions passed to dropdown:', suggestions);
                     $(this).data('ttTypeahead').dropdown.open();
+                }} else {{
+                    console.warn('[JS] No suggestions received or suggestions are empty.');
                 }}
             }})
             .on('typeahead:select', function(ev, suggestion) {{
-                console.log('[JS] Selection data:', JSON.stringify(suggestion, null, 2));
+                console.log('[JS] Selection event received with suggestion:', suggestion);
                 window['{handler}'](ev, suggestion);
             }});
+            console.log('[JS] Typeahead initialized successfully');
         }} catch (e) {{
             console.error('[JS] Typeahead init error:', e);
         }}

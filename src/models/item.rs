@@ -11,9 +11,39 @@ pub struct Item {
     pub custom_properties: HashMap<String, String>,
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WikidataSuggestion {
     pub id: String,
+    #[serde(default)]
     pub label: String,
-    pub description: Option<String>,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default, rename = "display")]
+    pub display: DisplayInfo,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct DisplayInfo {
+    #[serde(default, rename = "label")]
+    pub label: LabelInfo,
+    #[serde(default, rename = "description")]
+    pub description: DescriptionInfo,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct LabelInfo {
+    #[serde(default, rename = "value")]
+    pub value: String,
+    #[serde(default, rename = "language")]
+    pub language: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct DescriptionInfo {
+    #[serde(default, rename = "value")]
+    pub value: String,
+    #[serde(default, rename = "language")]
+    pub language: String,
 }
