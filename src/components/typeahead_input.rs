@@ -132,87 +132,100 @@ extern "C" {
     fn tt_adapter(this: &Bloodhound) -> JsValue;
 }
 
+
 fn initialize_bloodhound(fetch: Callback<String, Vec<WikidataSuggestion>>) -> JsValue {
     let bloodhound_options = Object::new();
     
-    let remote_fn = Closure::wrap(Box::new(move |query: JsValue, sync: Function| {
+    // Create a closure that will be called by Bloodhound to fetch suggestions
+    let remote_fn = Closure::wrap(Box::new(move |query: JsValue, sync: Function, async_fn: Function| {
         let query_str = query.as_string().unwrap_or_default();
         log!("[BLOODHOUND] Fetching suggestions for: {}", query_str);
+        
+        // Get suggestions from the callback
         let suggestions = fetch.call(query_str.clone());
         
-        let array = Array::new();
-        for suggestion in &suggestions {
+        // Create a JavaScript array to hold the suggestions
+        let js_suggestions = Array::new();
+        
+        // Convert each suggestion to a JavaScript object
+        for suggestion in suggestions {
             let obj = Object::new();
             
-            // Set flattened structure for Typeahead compatibility
-            Reflect::set(&obj, &"id".into(), &suggestion.id.clone().into()).unwrap();
-            Reflect::set(&obj, &"label".into(), &suggestion.label.clone().into()).unwrap();
-            Reflect::set(&obj, &"description".into(), &suggestion.description.clone().into()).unwrap();
+            // Store the original ID, label, and description
+            Reflect::set(&obj, &"id".into(), &JsValue::from_str(&suggestion.id)).unwrap();
+            Reflect::set(&obj, &"label".into(), &JsValue::from_str(&suggestion.label)).unwrap();
+            Reflect::set(&obj, &"description".into(), &JsValue::from_str(&suggestion.description)).unwrap();
             
-            // Flatten display values for direct access
-            Reflect::set(
-                &obj, 
-                &"displayLabel".into(), 
-                &suggestion.display.label.value.clone().into()
-            ).unwrap();
+            // Store the display values directly on the object for easier access
+            Reflect::set(&obj, &"displayLabel".into(), 
+                &JsValue::from_str(&suggestion.display.label.value)).unwrap();
+            Reflect::set(&obj, &"displayDescription".into(), 
+                &JsValue::from_str(&suggestion.display.description.value)).unwrap();
             
-            Reflect::set(
-                &obj,
-                &"displayDescription".into(),
-                &suggestion.display.description.value.clone().into()
-            ).unwrap();
-
-            array.push(&obj);
+            // Store the full suggestion for later retrieval
+            let full_suggestion = JsValue::from_serde(&suggestion).unwrap();
+            Reflect::set(&obj, &"fullSuggestion".into(), &full_suggestion).unwrap();
+            
+            // Add the object to the array
+            js_suggestions.push(&obj);
         }
-
-        log!("[BLOODHOUND] suggestions: {:?}", array);
         
-        let _ = sync.call1(&JsValue::NULL, &array);
-    }) as Box<dyn Fn(JsValue, Function)>);
+        log!("[BLOODHOUND] Processed suggestions: {:?}", js_suggestions);
+        
+        // Call the sync function with the suggestions
+        let _ = sync.call1(&JsValue::NULL, &js_suggestions);
+    }) as Box<dyn Fn(JsValue, Function, Function)>);
 
+    // Configure the remote options
     let remote_config = Object::new();
-
-    // Url function
+    
+    // Set transport function to avoid AJAX requests
+    let transport_fn = js_sys::Function::new_with_args(
+        "query, syncResults, asyncResults",
+        r#"
+        // Call our custom prepare function directly
+        window.bloodhoundPrepare(query, syncResults, asyncResults);
+        "#
+    );
+    
+    Reflect::set(
+        &remote_config,
+        &"transport".into(),
+        &transport_fn
+    ).unwrap();
+    
+    // Set a dummy URL (not actually used with custom transport)
     Reflect::set(
         &remote_config,
         &"url".into(),
         &JsValue::from_str("/dummy?query=%QUERY")
     ).unwrap();
     
-    // Prepare function
-    Reflect::set(
-        &remote_config,
-        &"prepare".into(),
+    // Store our prepare function globally
+    js_sys::Reflect::set(
+        &js_sys::global(),
+        &"bloodhoundPrepare".into(),
         remote_fn.as_ref().unchecked_ref()
     ).unwrap();
-
-    // Rate limiting
+    
+    // Set rate limiting to prevent too many requests
     Reflect::set(
         &remote_config,
         &"rateLimitWait".into(),
         &JsValue::from(300)
     ).unwrap();
-
-    // Response filter to prevent HTML parsing errors
-    let filter_fn = js_sys::Function::new_no_args(
-        "return function(response) { return response || []; }"
-    );
-    Reflect::set(
-        &remote_config,
-        &"filter".into(),
-        &filter_fn
-    ).unwrap();
     
-    // Wildcard function
+    // Set the wildcard for query replacement
     Reflect::set(
         &remote_config,
         &"wildcard".into(),
         &JsValue::from_str("%QUERY")
     ).unwrap();
-
+    
+    // Add the remote config to the options
     Reflect::set(&bloodhound_options, &"remote".into(), &remote_config).unwrap();
-
-    // Tokenizer functions from Bloodhound
+    
+    // Set the tokenizers
     let tokenizer = js_sys::Function::new_no_args(
         r#"
         return function(query) {
@@ -232,21 +245,17 @@ fn initialize_bloodhound(fetch: Callback<String, Vec<WikidataSuggestion>>) -> Js
         &"queryTokenizer".into(), 
         &tokenizer
     ).unwrap();
-
+    
+    // Create and initialize the Bloodhound instance
     let bloodhound = Bloodhound::new(&bloodhound_options.into());
     bloodhound.initialize(true);
-    remote_fn.forget();
-
-    // Explicit retention
-    js_sys::Reflect::set(
-        &js_sys::global(),
-        &"bloodhoundInstance".into(),
-        &bloodhound
-    ).unwrap();
     
+    // Prevent the closure from being garbage collected
+    remote_fn.forget();
+    
+    // Return the Bloodhound instance
     bloodhound.into()
 }
-
 
 fn initialize_typeahead(
     input: &HtmlInputElement,
@@ -261,8 +270,22 @@ fn initialize_typeahead(
     // Create selection handler closure
     let closure = Closure::wrap(Box::new(move |_event: web_sys::Event, suggestion: JsValue| {
         log!("[TYPEAHEAD] Selection made");
+        
+        // Try to get the full suggestion from the suggestion object
+        if let Some(full_suggestion) = js_sys::Reflect::get(&suggestion, &"fullSuggestion".into()).ok() {
+            if let Ok(data) = full_suggestion.into_serde::<WikidataSuggestion>() {
+                log!("[TYPEAHEAD] Selected suggestion: {:?}", data);
+                on_select.call(data.clone());
+                if let Some(input) = node_ref.get() {
+                    input.set_value(&data.label);
+                }
+                return;
+            }
+        }
+        
+        // Fallback: try to deserialize the suggestion directly
         if let Ok(data) = suggestion.into_serde::<WikidataSuggestion>() {
-            log!("[TYPEAHEAD] Selected suggestion: {:?}", data);
+            log!("[TYPEAHEAD] Selected suggestion (fallback): {:?}", data);
             on_select.call(data.clone());
             if let Some(input) = node_ref.get() {
                 input.set_value(&data.label);
@@ -287,6 +310,18 @@ fn initialize_typeahead(
         console.log('[JS] Starting Typeahead init for #{id}');
         try {{
             var bloodhound = window.bloodhoundInstance;
+            
+            // Define a custom source function that directly uses our Rust callback
+            var customSource = function(query, syncResults, asyncResults) {{
+                console.log('[JS] Custom source called with query:', query);
+                
+                // Call our global prepare function directly
+                window.bloodhoundPrepare(query, function(suggestions) {{
+                    console.log('[JS] Suggestions from custom source:', suggestions);
+                    syncResults(suggestions);
+                }}, asyncResults);
+            }};
+            
             $('#{id}').typeahead(
                 {{
                     hint: true,
@@ -297,24 +332,12 @@ fn initialize_typeahead(
                     name: 'suggestions',
                     display: function(data) {{
                         console.log('[JS] Display function called with data:', data);
-                        return data.display?.label?.value || data.label || '';
+                        return data.displayLabel || data.label || '';
                     }},
-                    source: function(query, syncResults) {{
-                        console.log('[JS] Bloodhound source called with query:', query);
-                        var bloodhound = window.bloodhoundInstance;
-                        bloodhound.ttAdapter()(query, function(suggestions) {{
-                            console.log('[JS] Suggestions from Bloodhound before syncResults:', suggestions);
-                            if (Array.isArray(suggestions)) {{
-                                console.log('[JS] Passing suggestions to syncResults:', suggestions);
-                                syncResults(suggestions);
-                            }} else {{
-                                console.warn('[JS] Suggestions are not an array:', suggestions);
-                            }}
-                        }});
-                    }},
+                    source: customSource,
                     templates: {{
                         suggestion: function(data) {{
-                        console.log('[JS] Rendering suggestion:', data);
+                            console.log('[JS] Rendering suggestion:', data);
                             return $('<div>')
                                 .addClass('suggestion-item')
                                 .append($('<div>').addClass('label').text(data.displayLabel || data.label))
@@ -327,15 +350,6 @@ fn initialize_typeahead(
                     }}
                 }}
             )
-            .on('typeahead:asyncreceive', function(ev, dataset, suggestions) {{
-                console.log('[JS] Received suggestions in typeahead:asyncreceive:', suggestions);
-                if (suggestions && suggestions.length > 0) {{
-                    console.log('[JS] Suggestions passed to dropdown:', suggestions);
-                    $(this).data('ttTypeahead').dropdown.open();
-                }} else {{
-                    console.warn('[JS] No suggestions received or suggestions are empty.');
-                }}
-            }})
             .on('typeahead:select', function(ev, suggestion) {{
                 console.log('[JS] Selection event received with suggestion:', suggestion);
                 window['{handler}'](ev, suggestion);
