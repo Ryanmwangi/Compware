@@ -1,3 +1,4 @@
+
 use leptos::*;
 use wasm_bindgen::prelude::*;
 use crate::models::item::WikidataSuggestion;
@@ -295,12 +296,15 @@ fn initialize_typeahead(
         }
     }) as Box<dyn FnMut(web_sys::Event, JsValue)>);
 
-    // Register global handler
-    let handler_name = format!("handler_{}", input_id);
+    // Register global handler 
+    let handler_name = format!("handler_{}", input_id.replace("-", "_"));
+    
+    log!("[TYPEAHEAD] Registering handler with name: {}", handler_name);
+    
     js_sys::Reflect::set(
         &js_sys::global(),
         &handler_name.clone().into(),
-        closure.as_ref(),
+        closure.as_ref().unchecked_ref(),
     ).unwrap();
     closure.forget();
 
@@ -360,7 +364,7 @@ fn initialize_typeahead(
         }}
         "#,
         id = input_id,
-        handler = handler_name.replace('-', "_")
+        handler = handler_name
     );
 
     log!("[RUST] Initialization script: {}", init_script);
