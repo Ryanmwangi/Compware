@@ -804,12 +804,18 @@ pub fn ItemsList(
                 <tbody>
                     {properties.into_iter().map(|property| {
                         let update_item_cloned = Arc::clone(&update_item);
+                        let current_url_for_closure = Rc::clone(&current_url);
                         log!("Rendering property: {}", property);
                         view! {
                             <tr>
                                 <td>{ property }</td>
-                                {move || items.get().iter().enumerate().map(|(index, item)| {
-                                    let update_item_clone = Arc::clone(&update_item_cloned);
+                                {{
+                                move || {
+                                    let items = items.get();
+                                    items.iter().enumerate().map(|(index, item)| {
+                                        let update_item_clone = Arc::clone(&update_item_cloned);
+                                        let current_url_clone = Rc::clone(&current_url_for_closure);
+                                        
                                         view! {
                                             <td>
                                             {match property {
@@ -855,7 +861,38 @@ pub fn ItemsList(
                                                                 }
                                                             });
                                                         })
-                                                        node_ref=node_ref
+                                                        is_last_row={index == items.len() - 1}
+                                                        on_input=Callback::new({
+                                                            // Clone items.len() before moving into the closure
+                                                            let items_len = items.len();
+                                                            let current_url_for_spawn = Rc::clone(&current_url_clone);
+                                                            move |value: String| {
+                                                                if index == items_len - 1 && !value.is_empty() {
+                                                                    // Use the cloned current_url
+                                                                    let current_url_for_new_item = Rc::clone(&current_url_for_spawn);
+                                                                    set_items.update(|items| {
+                                                                        let new_item = Item {
+                                                                            id: Uuid::new_v4().to_string(),
+                                                                            name: String::new(),
+                                                                            description: String::new(),
+                                                                            wikidata_id: None,
+                                                                            custom_properties: HashMap::new(),
+                                                                        };
+                                                                        items.push(new_item.clone());
+                                                                    
+                                                                        // Save the new item to the database
+                                                                        spawn_local({
+                                                                            let current_url = Rc::clone(&current_url_for_new_item);
+                                                                            let selected_properties = selected_properties;
+                                                                            async move {
+                                                                                save_item_to_db(new_item, selected_properties, current_url.to_string()).await;
+                                                                            }
+                                                                        });
+                                                                    });
+                                                                }
+                                                            }
+                                                        })
+                                                        node_ref=create_node_ref()
                                                     />
                                                     </div>
                                                 }.into_view(),
@@ -882,7 +919,9 @@ pub fn ItemsList(
                                             }}
                                             </td>
                                         }
-                                }).collect::<Vec<_>>()}                                
+                                        }).collect::<Vec<_>>()
+                                    }
+                                }}                                
                             </tr>
                         }
                     }).collect::<Vec<_>>()}
@@ -924,7 +963,8 @@ pub fn ItemsList(
                                     {move || {
                                         let update_item_cell = Arc::clone(&update_item_inner);
                                         let property_clone_for_cells = normalized_property.clone();
-                                        items.get().iter().enumerate().map(move |(index, item)| {
+                                        let items = items.get();
+                                        items.iter().enumerate().map(move |(index, item)| {
                                             let update_item_cell = Arc::clone(&update_item_cell);
                                             let property_clone_for_closure = property_clone_for_cells.clone();
                                         view! {
@@ -986,7 +1026,7 @@ pub fn ItemsList(
                 </datalist>
             </div>
         </div>
-    }
+    }    
 }
 
 #[derive(Deserialize, Clone, Debug)]

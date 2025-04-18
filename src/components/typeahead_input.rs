@@ -1,4 +1,3 @@
-
 use leptos::*;
 use wasm_bindgen::prelude::*;
 use crate::models::item::WikidataSuggestion;
@@ -16,6 +15,8 @@ pub fn TypeaheadInput(
     on_select: Callback<WikidataSuggestion>,
     fetch_suggestions: Callback<String, Vec<WikidataSuggestion>>,
     node_ref: NodeRef<Input>,
+    #[prop(optional)] is_last_row: bool,
+    #[prop(optional)] on_input: Option<Callback<String>>,
 ) -> impl IntoView {
     let (is_initialized, set_initialized) = create_signal(false);
     
@@ -111,6 +112,14 @@ pub fn TypeaheadInput(
             on:input=move |ev| {
                 let value = event_target_value(&ev);
                 log!("[INPUT] Value changed: {}", value);
+                
+                // If this is the last row and we have an on_input callback, call it
+                if is_last_row && !value.is_empty() {
+                    if let Some(callback) = &on_input {
+                        callback.call(value.clone());
+                    }
+                }
+                
                 let _ = js_sys::eval("console.log('jQuery version:', $.fn.jquery)");
                 let _ = js_sys::eval("console.log('Typeahead version:', $.fn.typeahead ? 'loaded' : 'missing')");
             }
