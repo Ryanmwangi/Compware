@@ -8,6 +8,8 @@ use wasm_bindgen::JsCast;
 use web_sys::HtmlInputElement; 
 use leptos::logging::log;
 use std::time::Duration;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 #[component]
 pub fn TypeaheadInput(
@@ -20,14 +22,42 @@ pub fn TypeaheadInput(
 ) -> impl IntoView {
     let (is_initialized, set_initialized) = create_signal(false);
     
+    // Flag to track if component is mounted
+    let is_mounted = Rc::new(RefCell::new(true));
+    let is_mounted_clone = is_mounted.clone();
+    
+    // Cleanup function to run when component is unmounted
+    on_cleanup(move || {
+        log!("[CLEANUP] TypeaheadInput component unmounting");
+        *is_mounted_clone.borrow_mut() = false;
+    });
+    
+    // Clone necessary values for the async task
+    let fetch_suggestions_clone = fetch_suggestions.clone();
+    let on_select_clone = on_select.clone();
+    let node_ref_clone = node_ref.clone();
+    
     spawn_local(async move {
         log!("[INIT] Component mounted");
         
         let mut retries = 0;
         while retries < 10 {
-            if let Some(input) = node_ref.get() {
+            // Check if component is still mounted before proceeding
+            if !*is_mounted.borrow() {
+                log!("[INIT] Component unmounted, aborting initialization");
+                return;
+            }
+            
+            if let Some(input) = node_ref_clone.get() {
                 log!("[INIT] Input element found");
-                let bloodhound = initialize_bloodhound(fetch_suggestions.clone());
+                
+                // Only proceed if component is still mounted
+                if !*is_mounted.borrow() {
+                    log!("[INIT] Component unmounted after input found, aborting");
+                    return;
+                }
+                
+                let bloodhound = initialize_bloodhound(fetch_suggestions_clone.clone());
                 
                 // Store bloodhound globally
                 js_sys::Reflect::set(
@@ -36,70 +66,84 @@ pub fn TypeaheadInput(
                     &bloodhound
                 ).unwrap();
 
-                initialize_typeahead(&input, bloodhound, on_select.clone(), node_ref.clone());
-                set_initialized.set(true);
+                // Only proceed if component is still mounted
+                if !*is_mounted.borrow() {
+                    log!("[INIT] Component unmounted before typeahead init, aborting");
+                    return;
+                }
+                
+                initialize_typeahead(&input, bloodhound, on_select_clone.clone(), node_ref_clone.clone());
+                
+                // Only set initialized if component is still mounted
+                if *is_mounted.borrow() {
+                    set_initialized.set(true);
+                }
                 break;
             }
+            
             gloo_timers::future::sleep(Duration::from_millis(100)).await;
             retries += 1;
         }
     });
 
+    // CSS
+    let css = r#"
+        .typeahead.tt-input {
+            background: transparent !important;
+        }
+
+        .tt-menu {
+            width: 100% !important;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-shadow: 0 5px 10px rgba(0,0,0,.2);
+            max-height: 300px;
+            overflow-y: auto;
+            z-index: 1000 !important;
+        }
+
+        .tt-dataset-suggestions {
+            padding: 8px 0;
+        }
+
+        .suggestion-item * {
+            pointer-events: none;  /* Prevent element interception */
+            white-space: nowrap;   /* Prevent text wrapping */
+            overflow: hidden;      /* Hide overflow */
+            text-overflow: ellipsis; /* Add ellipsis for long text */
+        }
+
+        .suggestion-item {
+            padding: 8px 15px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .suggestion-item:hover {
+            background-color: #f8f9fa;
+            cursor: pointer;
+        }
+
+        .label {
+            font-weight: 500;
+            color: #333;
+        }
+
+        .description {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 2px;
+        }
+
+        .empty-suggestion {
+            padding: 8px 15px;
+            color: #999;
+        }
+    "#;
+
     view! {
         <style>
-            {r#"
-            .typeahead.tt-input {{
-                background: transparent !important;
-            }}
-
-            .tt-menu {{
-                width: 100% !important;
-                background: white;
-                border: 1px solid #ddd;
-                border-radius: 4px;
-                box-shadow: 0 5px 10px rgba(0,0,0,.2);
-                max-height: 300px;
-                overflow-y: auto;
-                z-index: 1000 !important;
-            }}
-
-            .tt-dataset-suggestions {{
-                padding: 8px 0;
-            }}
-
-            .suggestion-item * {{
-                pointer-events: none;  /* Prevent element interception */
-                white-space: nowrap;   /* Prevent text wrapping */
-                overflow: hidden;      /* Hide overflow */
-                text-overflow: ellipsis; /* Add ellipsis for long text */
-            }}
-
-            .suggestion-item {{
-                padding: 8px 15px;
-                border-bottom: 1px solid #eee;
-            }}
-
-            .suggestion-item:hover {{
-                background-color: #f8f9fa;
-                cursor: pointer;
-            }}
-
-            .label {{
-                font-weight: 500;
-                color: #333;
-            }}
-
-            .description {{
-                font-size: 0.9em;
-                color: #666;
-                margin-top: 2px;
-            }}
-
-            .empty-suggestion {{
-                padding: 8px 15px;
-                color: #999;
-            }}
-        "#}
+            {css}
         </style>
 
         <input
@@ -317,6 +361,32 @@ fn initialize_typeahead(
     ).unwrap();
     closure.forget();
 
+    // Cleanup code to remove the typeahead when component is unmounted
+    let cleanup_script = format!(
+        r#"
+        // Store a reference to the cleanup function for this input
+        if (!window.typeaheadCleanupFunctions) {{
+            window.typeaheadCleanupFunctions = {{}};
+        }}
+        
+        window.typeaheadCleanupFunctions['{id}'] = function() {{
+            try {{
+                $('#{id}').typeahead('destroy');
+                delete window['{handler}'];
+                console.log('[JS] Typeahead cleanup for #{id} completed');
+            }} catch (e) {{
+                console.error('[JS] Typeahead cleanup error:', e);
+            }}
+        }};
+        "#,
+        id = input_id,
+        handler = handler_name
+    );
+    
+    if let Err(e) = js_sys::eval(&cleanup_script) {
+        log!("[RUST] Cleanup script eval error: {:?}", e);
+    }
+
     // Initialization script with enhanced logging
     let init_script = format!(
         r#"
@@ -380,4 +450,22 @@ fn initialize_typeahead(
     if let Err(e) = js_sys::eval(&init_script) {
         log!("[RUST] Eval error: {:?}", e);
     }
+    
+    // Register cleanup function to run when component is unmounted
+    on_cleanup(move || {
+        log!("[CLEANUP] Running typeahead cleanup for input: {}", input_id);
+        let cleanup_call = format!(
+            r#"
+            if (window.typeaheadCleanupFunctions && window.typeaheadCleanupFunctions['{id}']) {{
+                window.typeaheadCleanupFunctions['{id}']();
+                delete window.typeaheadCleanupFunctions['{id}'];
+            }}
+            "#,
+            id = input_id
+        );
+        
+        if let Err(e) = js_sys::eval(&cleanup_call) {
+            log!("[RUST] Cleanup call eval error: {:?}", e);
+        }
+    });
 }
