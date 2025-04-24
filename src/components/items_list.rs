@@ -597,59 +597,65 @@ pub fn ItemsList(
         let set_property_labels = set_property_labels.clone();
         let property_cache = property_cache.clone();
         let set_property_cache = set_property_cache.clone();
+        let set_custom_properties = set_custom_properties.clone();
+        let set_selected_properties = set_selected_properties.clone();
+        
         Arc::new(move |property: String| {
-        // Normalize the property ID
-        let normalized_property = property.replace("http://www.wikidata.org/prop/", "");
-        let normalized_property_clone = normalized_property.clone();
-
-        // Check if property is empty
-        if normalized_property.is_empty() {
-            log!("Attempted to add empty property, ignoring");
-            return;
-        }
-
-        // Check if label already exists
-        if !property_labels.get().contains_key(&normalized_property) {
-            spawn_local({
-                let normalized_property = normalized_property.clone();
-                let set_property_labels = set_property_labels.clone();
-                async move {
-                    // Add a placeholder label while fetching
-                    set_property_labels.update(|map| {
-                        map.insert(normalized_property.clone(), normalized_property.clone());
-                    });
-                    
-                    match fetch_property_labels(vec![normalized_property.clone()]).await {
+            // Normalize the property ID
+            let normalized_property = property.replace("http://www.wikidata.org/prop/", "");
+            
+            // Early return if property is empty
+            if normalized_property.is_empty() {
+                log!("Attempted to add empty property, ignoring");
+                return;
+            }
+            
+            // Create local copies of all signals to avoid capturing them in closures
+            let property_labels_snapshot = property_labels.get();
+            let selected_properties_snapshot = selected_properties.get();
+            let custom_properties_snapshot = custom_properties.get();
+            
+            // Check if label already exists
+            if !property_labels_snapshot.contains_key(&normalized_property) {
+                let normalized_property_clone = normalized_property.clone();
+                let set_property_labels_clone = set_property_labels.clone();
+                
+                // Add a placeholder label immediately
+                set_property_labels.update(|map| {
+                    map.insert(normalized_property_clone.clone(), normalized_property_clone.clone());
+                });
+                
+                // Fetch the actual label in a separate task
+                spawn_local(async move {
+                    match fetch_property_labels(vec![normalized_property_clone.clone()]).await {
                         Ok(labels) => {
-                            set_property_labels.update(|map| {
+                            set_property_labels_clone.update(|map| {
                                 map.extend(labels);
                             });
                         },
                         Err(e) => {
                             log!("Error fetching property labels: {:?}", e);
-                            // Keep the placeholder label
                         }
                     }
-                }
-            });
-        }
-        
-        // Check if property is already selected
-        if !selected_properties.get().contains_key(&normalized_property) && !normalized_property.is_empty() {
-            // Add property to selected properties
-            set_selected_properties.update(|selected| {
-                selected.insert(normalized_property.clone(), true);
-            });
-
-            // Save the selected property to the database
-            spawn_local({
-                let current_url = Rc::clone(&current_url);
-                let normalized_property = normalized_property_clone.clone();
-                async move {
+                });
+            }
+            
+            // Check if property is already selected
+            if !selected_properties_snapshot.contains_key(&normalized_property) {
+                // Add property to selected properties
+                set_selected_properties.update(|selected| {
+                    selected.insert(normalized_property.clone(), true);
+                });
+                
+                // Save the selected property to the database
+                let current_url_clone = Rc::clone(&current_url);
+                let normalized_property_clone = normalized_property.clone();
+                
+                spawn_local(async move {
                     let response = gloo_net::http::Request::post(
-                        &format!("/api/urls/{}/properties", encode(&current_url))
+                        &format!("/api/urls/{}/properties", encode(&current_url_clone))
                     )
-                    .json(&normalized_property)
+                    .json(&normalized_property_clone)
                     .unwrap()
                     .send()
                     .await;
@@ -666,85 +672,84 @@ pub fn ItemsList(
                             log!("Error saving property: {:?}", err);
                         }
                     }
-                }
-            });
-        }
-
-        set_custom_properties.update(|props| {
-            if !props.contains(&normalized_property) && !normalized_property.is_empty() {
-                props.push(normalized_property.clone());
-
-                //update the selected_properties state when a new property is added
-                set_selected_properties.update(|selected| {
-                    selected.insert(normalized_property.clone(), true);
                 });
-
-                // Ensure the grid updates reactively
+            }
+            
+            // Update custom properties if not already present
+            if !custom_properties_snapshot.contains(&normalized_property) {
+                set_custom_properties.update(|props| {
+                    props.push(normalized_property.clone());
+                });
+                
+                // Update items with the new property
                 set_items.update(|items| {
                     for item in items {
-                        // Safely insert the property if it doesn't exist
+                        // Only add if it doesn't exist
                         if !item.custom_properties.contains_key(&normalized_property) {
                             item.custom_properties.insert(normalized_property.clone(), "".to_string());
                         }
-                        
-                        // Save the updated item to the database
-                        let item_clone = item.clone();
-                        spawn_local({
-                            let current_url = Rc::clone(&current_url);
-                            async move {
-                                save_item_to_db(item_clone, selected_properties, current_url.to_string()).await;
-                            }
-                        });
                     }
                 });
-
-                // Use the property label from the property_labels signal
-                let property_label = property_labels.get().get(&normalized_property).cloned().unwrap_or_else(|| normalized_property.clone());
+                
+                // Save each item to the database
+                let items_snapshot = items.get();
+                for item in items_snapshot {
+                    let item_clone = item.clone();
+                    let current_url_clone = Rc::clone(&current_url);
+                    let selected_properties_clone = selected_properties;
+                    
+                    spawn_local(async move {
+                        save_item_to_db(item_clone, selected_properties_clone, current_url_clone.to_string()).await;
+                    });
+                }
+                
+                // Log the addition
+                let property_label = property_labels_snapshot
+                    .get(&normalized_property)
+                    .cloned()
+                    .unwrap_or_else(|| normalized_property.clone());
+                
                 log!("Added property with label: {}", property_label);
-
             }
-        });
-        // Fetch the relevant value for each item and populate the corresponding cells
-        set_items.update(|items| {
-            for item in items {
-                // Initialize property with empty string if it doesn't exist
-                item.custom_properties.entry(normalized_property.clone())
-                    .or_insert_with(|| "".to_string());
-
-                // Only fetch properties if Wikidata ID exists
+            
+            // Fetch Wikidata properties for items with IDs
+            let items_snapshot = items.get();
+            for item in items_snapshot {
                 if let Some(wikidata_id) = &item.wikidata_id {
-                    let wikidata_id = wikidata_id.clone();
-                    let set_items = set_items.clone();
-                    let set_fetched_properties = set_fetched_properties.clone();
-                    let property_clone = normalized_property.clone();
+                    let wikidata_id_clone = wikidata_id.clone();
+                    let normalized_property_clone = normalized_property.clone();
+                    let set_items_clone = set_items.clone();
+                    let set_property_labels_clone = set_property_labels.clone();
+                    let property_cache_clone = property_cache.clone();
+                    let set_property_cache_clone = set_property_cache.clone();
+                    let property_labels_clone = property_labels.clone();
                     
                     spawn_local(async move {
                         let properties = fetch_item_properties(
-                            &wikidata_id,
-                            set_property_labels.clone(),
-                            property_cache.clone(),
-                            set_property_cache.clone(),
-                            property_labels.clone()
+                            &wikidata_id_clone,
+                            set_property_labels_clone,
+                            property_cache_clone,
+                            set_property_cache_clone,
+                            property_labels_clone
                         ).await;
-
-                        // Update the specific property for this item
-                        if let Some(value) = properties.get(&property_clone) {
-                            set_items.update(|items| {
-                                if let Some(item) = items.iter_mut()
-                                    .find(|i| i.wikidata_id.as_ref() == Some(&wikidata_id)) 
-                                {
-                                    item.custom_properties.insert(
-                                        property_clone.clone(), 
-                                        value.clone()
-                                    );
+                        
+                        if let Some(value) = properties.get(&normalized_property_clone) {
+                            set_items_clone.update(|items| {
+                                for item in items {
+                                    if item.wikidata_id.as_ref() == Some(&wikidata_id_clone) {
+                                        item.custom_properties.insert(
+                                            normalized_property_clone.clone(),
+                                            value.clone()
+                                        );
+                                    }
                                 }
                             });
                         }
                     });
                 }
             }
-        });
-    })};
+        })
+    };
     
     // Update item fields
     let update_item = {
@@ -835,19 +840,22 @@ pub fn ItemsList(
                     </tr>
                 </thead>
                 <tbody>
-                    {properties.into_iter().map(|property| {
-                        let update_item_cloned = Arc::clone(&update_item);
-                        let current_url_for_closure = Rc::clone(&current_url);
-                        log!("Rendering property: {}", property);
-                        view! {
-                            <tr>
-                                <td>{ property }</td>
-                                {{
+                {properties.into_iter().map(|property| {
+                    let update_item_cloned = Arc::clone(&update_item);
+                    let current_url_for_closure = Rc::clone(&current_url);
+                    log!("Rendering property: {}", property);
+                    view! {
+                        <tr>
+                            <td>{ property }</td>
+                            {{
+                                // Clone current_url before the nested closure
+                                let current_url_for_inner = Rc::clone(&current_url_for_closure);
+                                
                                 move || {
                                     let items = items.get();
                                     items.iter().enumerate().map(|(index, item)| {
                                         let update_item_clone = Arc::clone(&update_item_cloned);
-                                        let current_url_clone = Rc::clone(&current_url_for_closure);
+                                        let current_url_clone = Rc::clone(&current_url_for_inner);
                                         
                                         view! {
                                             <td>
@@ -856,54 +864,69 @@ pub fn ItemsList(
                                                     <div class="typeahead-container">
                                                     <TypeaheadInput
                                                         value=item.name.clone()
-                                                        fetch_suggestions=Callback::new(move |query: String| -> Vec<WikidataSuggestion> {
+                                                        fetch_suggestions=Callback::new({
                                                             let key = format!("name-{}", index);
-                                                            fetch_wikidata_suggestions(key.clone(), query.clone());
+                                                            let wikidata_suggestions_clone = wikidata_suggestions.clone();
                                                             
-                                                            // Add a small delay to ensure state is updated
-                                                            let suggestions = wikidata_suggestions.get();
-                                                            suggestions.get(&key).cloned().unwrap_or_default()
+                                                            move |query: String| -> Vec<WikidataSuggestion> {
+                                                                // Fetch suggestions in a separate function to avoid capturing too much
+                                                                fetch_wikidata_suggestions(key.clone(), query.clone());
+                                                                
+                                                                // Return current suggestions from the signal
+                                                                let suggestions = wikidata_suggestions_clone.get();
+                                                                suggestions.get(&key).cloned().unwrap_or_default()
+                                                            }
                                                         })
-                                                        on_select=Callback::new(move |suggestion: WikidataSuggestion| {
-                                                            set_items.update(|items| {
-                                                                if let Some(item) = items.get_mut(index) {
-                                                                    item.name = suggestion.display.label.value.clone();
-                                                                    item.description = suggestion.display.description.value.clone();
-                                                                    item.wikidata_id = Some(suggestion.id.clone());
-                                                                    
-                                                                    // Automatically fetch properties when Wikidata ID is set
-                                                                    if let Some(wikidata_id) = &item.wikidata_id {
-                                                                        spawn_local({
-                                                                            let set_property_labels = set_property_labels.clone();
-                                                                            let property_cache = property_cache.clone();
-                                                                            let set_property_cache = set_property_cache.clone();
-                                                                            let property_labels = property_labels.clone();
-                                                                            let wikidata_id = wikidata_id.clone();
-                                                                            
-                                                                            async move {
-                                                                                fetch_item_properties(
-                                                                                    &wikidata_id,
-                                                                                    set_property_labels,
-                                                                                    property_cache,
-                                                                                    set_property_cache,
-                                                                                    property_labels
-                                                                                ).await;
-                                                                            }
-                                                                        });
+                                                        on_select=Callback::new({
+                                                            let set_items_clone = set_items.clone();
+                                                            let set_property_labels_clone = set_property_labels.clone();
+                                                            let property_cache_clone = property_cache.clone();
+                                                            let set_property_cache_clone = set_property_cache.clone();
+                                                            let property_labels_clone = property_labels.clone();
+                                                            
+                                                            move |suggestion: WikidataSuggestion| {
+                                                                let wikidata_id = suggestion.id.clone();
+                                                                
+                                                                set_items_clone.update(|items| {
+                                                                    if let Some(item) = items.get_mut(index) {
+                                                                        item.name = suggestion.display.label.value.clone();
+                                                                        item.description = suggestion.display.description.value.clone();
+                                                                        item.wikidata_id = Some(wikidata_id.clone());
                                                                     }
-                                                                }
-                                                            });
+                                                                });
+                                                                
+                                                                // Fetch properties in a separate task
+                                                                let set_property_labels_for_task = set_property_labels_clone.clone();
+                                                                let property_cache_for_task = property_cache_clone.clone();
+                                                                let set_property_cache_for_task = set_property_cache_clone.clone();
+                                                                let property_labels_for_task = property_labels_clone.clone();
+                                                                let wikidata_id_for_task = wikidata_id.clone();
+                                                                
+                                                                spawn_local(async move {
+                                                                    fetch_item_properties(
+                                                                        &wikidata_id_for_task,
+                                                                        set_property_labels_for_task,
+                                                                        property_cache_for_task,
+                                                                        set_property_cache_for_task,
+                                                                        property_labels_for_task
+                                                                    ).await;
+                                                                });
+                                                            }
                                                         })
                                                         is_last_row={index == items.len() - 1}
                                                         on_input=Callback::new({
                                                             // Clone items.len() before moving into the closure
                                                             let items_len = items.len();
-                                                            let current_url_for_spawn = Rc::clone(&current_url_clone);
+                                                            let set_items_clone = set_items.clone();
+                                                            let current_url_clone = Rc::clone(&current_url_clone);
+                                                            let selected_properties_clone = selected_properties.clone();
+                                                            
                                                             move |value: String| {
                                                                 if index == items_len - 1 && !value.is_empty() {
-                                                                    // Use the cloned current_url
-                                                                    let current_url_for_new_item = Rc::clone(&current_url_for_spawn);
-                                                                    set_items.update(|items| {
+                                                                    let current_url_for_new_item = Rc::clone(&current_url_clone);
+                                                                    let selected_properties_for_new_item = selected_properties_clone.clone();
+                                                                    
+                                                                    set_items_clone.update(|items| {
                                                                         let new_item = Item {
                                                                             id: Uuid::new_v4().to_string(),
                                                                             name: String::new(),
@@ -913,13 +936,17 @@ pub fn ItemsList(
                                                                         };
                                                                         items.push(new_item.clone());
                                                                     
-                                                                        // Save the new item to the database
-                                                                        spawn_local({
-                                                                            let current_url = Rc::clone(&current_url_for_new_item);
-                                                                            let selected_properties = selected_properties;
-                                                                            async move {
-                                                                                save_item_to_db(new_item, selected_properties, current_url.to_string()).await;
-                                                                            }
+                                                                        // Save the new item to the database in a separate task
+                                                                        let new_item_clone = new_item.clone();
+                                                                        let current_url_for_task = Rc::clone(&current_url_for_new_item);
+                                                                        let selected_properties_for_task = selected_properties_for_new_item;
+                                                                        
+                                                                        spawn_local(async move {
+                                                                            save_item_to_db(
+                                                                                new_item_clone, 
+                                                                                selected_properties_for_task, 
+                                                                                current_url_for_task.to_string()
+                                                                            ).await;
                                                                         });
                                                                     });
                                                                 }
@@ -952,12 +979,12 @@ pub fn ItemsList(
                                             }}
                                             </td>
                                         }
-                                        }).collect::<Vec<_>>()
-                                    }
-                                }}                                
-                            </tr>
-                        }
-                    }).collect::<Vec<_>>()}
+                                    }).collect::<Vec<_>>()
+                                }
+                            }}                                
+                        </tr>
+                    }
+                }).collect::<Vec<_>>()}
                     // Dynamically adding custom properties as columns
                     {{
                         let update_item_outer = Arc::clone(&update_item);
@@ -1025,36 +1052,53 @@ pub fn ItemsList(
                 </tbody>
             </table>
             <div style="margin-bottom: 20px;">
-                <input type="text" id="new-property" placeholder="Add New Property" list="properties" on:keydown=move |event| {
-                    if event.key() == "Enter" {
-                        let input_element = event.target().unwrap().dyn_into::<web_sys::HtmlInputElement>().unwrap();
-                        let input_value = input_element.value();
-                        
-                        // Extract property ID from "Label (P123)" format
-                        let property_id = input_value
-                            .split(" (")
-                            .last()
-                            .and_then(|s| s.strip_suffix(')'))
-                            .unwrap_or(&input_value)
-                            .to_string();
-                
-                        if !property_id.is_empty() {
-                            // Add the property using the extracted ID
-                            add_property(property_id);
-                            input_element.set_value("");
+                <input 
+                    type="text" 
+                    id="new-property" 
+                    placeholder="Add New Property" 
+                    list="properties" 
+                    on:keydown=move |event| {
+                        if event.key() == "Enter" {
+                            // Safely get the input element
+                            if let Some(target) = event.target() {
+                                if let Ok(input_element) = target.dyn_into::<web_sys::HtmlInputElement>() {
+                                    let input_value = input_element.value();
+
+                                    // Extract property ID from "Label (P123)" format
+                                    let property_id = if input_value.contains(" (") && input_value.ends_with(')') {
+                                        let parts: Vec<&str> = input_value.rsplitn(2, " (").collect();
+                                        if parts.len() == 2 {
+                                            parts[0].trim_end_matches(')').to_string()
+                                        } else {
+                                            input_value.clone()
+                                        }
+                                    } else {
+                                        input_value.clone()
+                                    };
+                                
+                                    if !property_id.is_empty() {
+                                        // Add the property using the extracted ID
+                                        add_property(property_id);
+                                        input_element.set_value("");
+                                    }
+                                }
+                            }
                         }
-                    }
-                } />
+                    } 
+                />
                 <datalist id="properties">
                     {move || {
-                        let property_labels = property_labels.get().clone();
-                        property_labels.into_iter().map(|(property_id, label)| {
-                            view! {
-                                <option value={format!("{} ({})", label, property_id)}>
-                                    { format!("{} ({})", label, property_id) }
-                                </option>
-                            }
-                        }).collect::<Vec<_>>()
+                        let property_labels_snapshot = property_labels.get();
+                        property_labels_snapshot.iter()
+                            .map(|(property_id, label)| {
+                                let option_value = format!("{} ({})", label, property_id);
+                                view! {
+                                    <option value={option_value.clone()}>
+                                        {option_value}
+                                    </option>
+                                }
+                            })
+                            .collect::<Vec<_>>()
                     }}
                 </datalist>
             </div>
