@@ -206,12 +206,18 @@ pub fn ItemsList(
 
                 // Fetch labels for the custom properties
                 let property_ids = custom_props_clone;
-                let labels = fetch_property_labels(property_ids).await;
-                set_property_labels.update(|labels_map| {
-                    for (key, value) in labels {
-                        labels_map.insert(key, value);
+                match fetch_property_labels(property_ids).await {
+                    Ok(labels) => {
+                        set_property_labels.update(|labels_map| {
+                            for (key, value) in labels {
+                                labels_map.insert(key, value);
+                            }
+                        });
+                    },
+                    Err(e) => {
+                        log!("Error fetching property labels: {:?}", e);
                     }
-                });
+                }
 
                 // log!("Items after loading: {:?}", items.get());
             }
@@ -449,10 +455,16 @@ pub fn ItemsList(
                         .collect();
     
                     if !missing_ids.is_empty() {
-                        let new_labels = fetch_property_labels(missing_ids).await;
-                        set_property_labels.update(|labels| {
-                            labels.extend(new_labels.clone());
-                        });
+                        match fetch_property_labels(missing_ids).await {
+                            Ok(new_labels) => {
+                                set_property_labels.update(|labels| {
+                                    labels.extend(new_labels.clone());
+                                });
+                            },
+                            Err(e) => {
+                                log!("Error fetching property labels: {:?}", e);
+                            }
+                        }
                     }
     
                     // Second pass: build results
@@ -494,7 +506,7 @@ pub fn ItemsList(
         }
     }
     
-    async fn fetch_property_labels(property_ids: Vec<String>) -> HashMap<String, String> {
+    async fn fetch_property_labels(property_ids: Vec<String>) -> Result<HashMap<String, String>, String> {
         log!("Fetching property labels for properties: {:?}", property_ids);
         
         // Remove the "http://www.wikidata.org/prop/" prefix from property IDs
@@ -529,7 +541,7 @@ pub fn ItemsList(
                 log!("Received response from Wikidata. Status: {}", response.status());
                 if response.status() != 200 {
                     log!("Error: Unexpected status code {}", response.status());
-                    return HashMap::new();
+                    return Err(format!("Unexpected status code: {}", response.status()));
                 }
     
                 match response.text().await {
@@ -557,23 +569,23 @@ pub fn ItemsList(
                                     log!("Warning: No bindings found in the response");
                                 }
                                 log!("Fetched {} property labels", result.len());
-                                result
+                                Ok(result)
                             }
                             Err(e) => {
                                 log!("Error parsing response from Wikidata: {:?}", e);
-                                HashMap::new()
+                                Err(format!("Error parsing response: {:?}", e))
                             }
                         }
                     }
                     Err(e) => {
                         log!("Error reading response body: {:?}", e);
-                        HashMap::new()
+                        Err(format!("Error reading response body: {:?}", e))
                     }
                 }
             }
             Err(e) => {
                 log!("Error fetching property labels from Wikidata: {:?}", e);
-                HashMap::new()
+                Err(format!("Error fetching property labels: {:?}", e))
             }
         }
     }
@@ -590,16 +602,34 @@ pub fn ItemsList(
         let normalized_property = property.replace("http://www.wikidata.org/prop/", "");
         let normalized_property_clone = normalized_property.clone();
 
+        // Check if property is empty
+        if normalized_property.is_empty() {
+            log!("Attempted to add empty property, ignoring");
+            return;
+        }
+
         // Check if label already exists
         if !property_labels.get().contains_key(&normalized_property) {
             spawn_local({
                 let normalized_property = normalized_property.clone();
                 let set_property_labels = set_property_labels.clone();
                 async move {
-                    let labels = fetch_property_labels(vec![normalized_property.clone()]).await;
+                    // Add a placeholder label while fetching
                     set_property_labels.update(|map| {
-                        map.extend(labels);
+                        map.insert(normalized_property.clone(), normalized_property.clone());
                     });
+                    
+                    match fetch_property_labels(vec![normalized_property.clone()]).await {
+                        Ok(labels) => {
+                            set_property_labels.update(|map| {
+                                map.extend(labels);
+                            });
+                        },
+                        Err(e) => {
+                            log!("Error fetching property labels: {:?}", e);
+                            // Keep the placeholder label
+                        }
+                    }
                 }
             });
         }
@@ -652,7 +682,10 @@ pub fn ItemsList(
                 // Ensure the grid updates reactively
                 set_items.update(|items| {
                     for item in items {
-                        item.custom_properties.entry(normalized_property.clone()).or_insert_with(|| "".to_string());
+                        // Safely insert the property if it doesn't exist
+                        if !item.custom_properties.contains_key(&normalized_property) {
+                            item.custom_properties.insert(normalized_property.clone(), "".to_string());
+                        }
                         
                         // Save the updated item to the database
                         let item_clone = item.clone();
