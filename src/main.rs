@@ -3,9 +3,10 @@ use actix_web::{web, HttpResponse, Responder};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use compareware::db::Database;
-use compareware::api::{ItemRequest,create_item, get_items, get_selected_properties, add_selected_property};
+use compareware::api::{ItemRequest, create_item, get_items, get_selected_properties, add_selected_property};
 use compareware::models::item::Item;
 
+#[cfg(feature = "ssr")]
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     use actix_files::Files;
@@ -18,16 +19,18 @@ async fn main() -> std::io::Result<()> {
     use std::sync::Arc;
     use tokio::sync::Mutex;
     
+    // Setup logging
+    std::env::set_var("RUST_LOG", "info");
+    
     // Initialize the database
     let db = Database::new("compareware.db").unwrap();
     db.create_schema().await.unwrap(); // Ensure the schema is created
     let db = Arc::new(Mutex::new(db)); // Wrap the database in an Arc<Mutex<T>> for shared state
     println!("Schema created successfully!");
     
-    // Load configuration
-    let conf = get_configuration(None).await.unwrap();
+    // Load configuration 
+    let conf = get_configuration(Some("Cargo.toml")).await.unwrap();
     let addr = conf.leptos_options.site_addr;
-
 
     // Generate the list of routes in your Leptos App
     let routes = generate_route_list(App);
@@ -79,6 +82,7 @@ async fn main() -> std::io::Result<()> {
     .await
 }
 
+#[cfg(feature = "ssr")]
 // Handler to get items for a specific URL
 async fn get_items_handler(
     db: web::Data<Arc<Mutex<Database>>>,
@@ -87,6 +91,7 @@ async fn get_items_handler(
     get_items(db, web::Query(url.into_inner())).await
 }
 
+#[cfg(feature = "ssr")]
 // Handler to create an item for a specific URL
 async fn create_item_handler(
     db: web::Data<Arc<Mutex<Database>>>,
@@ -125,11 +130,13 @@ async fn add_selected_property_handler(
 ) -> impl Responder {
     add_selected_property(db, url, property).await
 }
+
 #[cfg(feature = "ssr")]
 // Define the index handler
 async fn index() -> HttpResponse {
     HttpResponse::Ok().body("Welcome to CompareWare!")
 }
+
 #[cfg(feature = "ssr")]
 // Define the URL handler
 async fn url_handler(url: web::Path<String>) -> HttpResponse {
