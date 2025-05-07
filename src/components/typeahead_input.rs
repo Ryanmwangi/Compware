@@ -536,8 +536,19 @@ fn initialize_bloodhound(
             let query_str = query.as_string().unwrap_or_default();
             log!("[BLOODHOUND] Fetching suggestions for: {}", query_str);
             
+            // Defensive: check if we have a valid Leptos owner
+            let owner = match Owner::current() {
+                Some(owner) => owner,
+                None => {
+                    log!("[BLOODHOUND] No Leptos owner, aborting fetch");
+                    let empty_results = Array::new();
+                    let _ = sync.call1(&JsValue::NULL, &empty_results);
+                    return;
+                }
+            };
+            
             // Safely call the fetch callback
-            let suggestions = match try_with_owner(Owner::current().unwrap(), {
+            let suggestions = match try_with_owner(owner, {
                 // Clone these values for the inner closure
                 let is_alive = is_alive.clone();
                 let fetch = fetch.clone();
@@ -800,11 +811,19 @@ fn initialize_typeahead(
                 log!("[TYPEAHEAD] Component no longer alive, aborting selection handler");
                 return;
             }
-            
+            // Defensive: check if we have a valid Leptos owner
+            let owner = match Owner::current() {
+                Some(owner) => owner,
+                None => {
+                    log!("[TYPEAHEAD] No Leptos owner, aborting selection handler");
+                    return;
+                }
+            };
+
             log!("[TYPEAHEAD] Selection made");
             
             // Safely call the on_select callback
-            let _ = try_with_owner(Owner::current().unwrap(), {
+            let _ = try_with_owner(owner, {
                 // Clone these values again for the inner closure
                 let is_alive = is_alive.clone();
                 let on_select = on_select.clone();
