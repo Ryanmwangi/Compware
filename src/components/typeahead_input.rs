@@ -305,9 +305,13 @@ pub fn TypeaheadInput(
                     // Only set initialized if component is still alive
                     if closures_clone.borrow().is_alive.load(Ordering::SeqCst) && !cancel_token.get() {
                         // Use a try_update to safely update the signal
-                        let _ = try_with_owner(Owner::current().unwrap(), move || {
-                            set_initialized.set(true);
-                        });
+                        if let Some(owner) = Owner::current() {
+                            let _ = try_with_owner(owner, move || {
+                                set_initialized.set(true);
+                            });
+                        } else {
+                            log!("[INIT] No Leptos owner when setting initialized, aborting");
+                        }
                     }
                     break;
                 }
