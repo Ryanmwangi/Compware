@@ -135,8 +135,16 @@ pub fn TypeaheadInput(
                 initialized: false,
                 bloodhound: null,
                 handlers: {{}},
+                // EXPLICIT ALIVE FLAG
+                alive: true,
                 // Method to safely call handlers
                 callHandler: function(handlerName, ...args) {{
+                    // DEFENSIVE: Check alive flag before calling any handler
+                    if (!this.alive) {{
+                        console.warn('[JS] Component {component_id} is no longer alive, ignoring handler call: ' + handlerName);
+                        return null;
+                    }}
+                    
                     try {{
                         const handler = this.handlers[handlerName];
                         if (handler && typeof handler === 'function') {{
@@ -149,6 +157,12 @@ pub fn TypeaheadInput(
                 }},
                 // Method to register a handler
                 registerHandler: function(name, fn) {{
+                    // DEFENSIVE: Don't register handlers if component is not alive
+                    if (!this.alive) {{
+                        console.warn('[JS] Component {component_id} is no longer alive, ignoring handler registration: ' + name);
+                        return false;
+                    }}
+                    
                     this.handlers[name] = fn;
                     return true;
                 }},
@@ -163,11 +177,43 @@ pub fn TypeaheadInput(
                 // Method to clean up all resources
                 cleanup: function() {{
                     try {{
+                        // IMPORTANT: Set alive to false FIRST to prevent any new calls
+                        this.alive = false;
+                        console.log('[JS] Component {component_id} marked as not alive');
+                        
                         // Clean up typeahead
                         const inputId = 'typeahead-input-{component_id}';
                         const $input = $('#' + inputId);
                         if ($input.length > 0) {{
+                            // Remove all event handlers first
+                            $input.off('typeahead:select');
+                            $input.off('typeahead:active');
+                            $input.off('typeahead:idle');
+                            $input.off('typeahead:open');
+                            $input.off('typeahead:close');
+                            $input.off('typeahead:change');
+                            $input.off('typeahead:render');
+                            $input.off('typeahead:autocomplete');
+                            $input.off('typeahead:cursorchange');
+                            $input.off('typeahead:asyncrequest');
+                            $input.off('typeahead:asynccancel');
+                            $input.off('typeahead:asyncreceive');
+                            console.log('[JS] Removed all typeahead event handlers for {component_id}');
+                            
+                            // Now destroy the typeahead
                             $input.typeahead('destroy');
+                            console.log('[JS] Destroyed typeahead for {component_id}');
+                        }}
+                        
+                        // Explicitly null out the global handler references
+                        if (window.rustSelectHandler_{component_id_safe}) {{
+                            window.rustSelectHandler_{component_id_safe} = null;
+                            console.log('[JS] Nulled rustSelectHandler_{component_id_safe}');
+                        }}
+                        
+                        if (window.rustFetchHandler_{component_id_safe}) {{
+                            window.rustFetchHandler_{component_id_safe} = null;
+                            console.log('[JS] Nulled rustFetchHandler_{component_id_safe}');
                         }}
                         
                         // Clear all handlers
@@ -181,6 +227,8 @@ pub fn TypeaheadInput(
                         return true;
                     }} catch (e) {{
                         console.error('[JS] Error during cleanup:', e);
+                        // Still mark as not alive even if cleanup fails
+                        this.alive = false;
                         return false;
                     }}
                 }}
@@ -189,7 +237,8 @@ pub fn TypeaheadInput(
             console.log('[JS] Registered component {component_id}');
             true
             "#,
-            component_id = component_id
+            component_id = component_id,
+            component_id_safe = component_id.replace("-", "_")
         );
         
         // Execute the registration script
@@ -342,8 +391,21 @@ pub fn TypeaheadInput(
                 r#"
                 // Perform cleanup in JavaScript first
                 if (window.typeaheadRegistry && window.typeaheadRegistry['{component_id}']) {{
+                    console.log('[JS] Starting cleanup for component {component_id}');
+                    
                     // Clean up the component
                     const result = window.typeaheadRegistry['{component_id}'].cleanup();
+                    
+                    // DEFENSIVE: Explicitly null out global handlers even if cleanup fails
+                    if (window.rustSelectHandler_{component_id_safe}) {{
+                        window.rustSelectHandler_{component_id_safe} = null;
+                        console.log('[JS] Nulled rustSelectHandler_{component_id_safe} during cleanup');
+                    }}
+                    
+                    if (window.rustFetchHandler_{component_id_safe}) {{
+                        window.rustFetchHandler_{component_id_safe} = null;
+                        console.log('[JS] Nulled rustFetchHandler_{component_id_safe} during cleanup');
+                    }}
                     
                     // Remove from registry
                     delete window.typeaheadRegistry['{component_id}'];
@@ -351,11 +413,12 @@ pub fn TypeaheadInput(
                     console.log('[JS] Component {component_id} removed from registry');
                     result
                 }} else {{
-                    console.warn('[JS] Component {component_id} not found in registry');
+                    console.warn('[JS] Component {component_id} not found in registry during cleanup');
                     false
                 }}
                 "#,
-                component_id = component_id_for_cleanup
+                component_id = component_id_for_cleanup,
+                component_id_safe = component_id_for_cleanup.replace("-", "_")
             );
             
             // Execute JavaScript cleanup
@@ -643,16 +706,25 @@ fn initialize_bloodhound(
     let transport_fn = js_sys::Function::new_with_args(
         "query, syncResults, asyncResults",
         &format!(r#"
+        // DEFENSIVE: Check if registry exists and component is alive
+        if (!window.typeaheadRegistry || !window.typeaheadRegistry['{component_id}']) {{
+            console.warn('[JS] Component registry not found for {component_id}, returning empty results');
+            syncResults([]);
+            return;
+        }}
+        
+        // DEFENSIVE: Check alive flag explicitly
+        if (!window.typeaheadRegistry['{component_id}'].alive) {{
+            console.warn('[JS] Component {component_id} is no longer alive, returning empty results');
+            syncResults([]);
+            return;
+        }}
+        
         // Call our handler through the registry
-        if (window.typeaheadRegistry && window.typeaheadRegistry['{component_id}']) {{
-            try {{
-                window.typeaheadRegistry['{component_id}'].callHandler('fetch', query, syncResults, asyncResults);
-            }} catch (e) {{
-                console.error('[JS] Error calling fetch handler through registry:', e);
-                syncResults([]);
-            }}
-        }} else {{
-            console.error('[JS] Component registry not found for {component_id}');
+        try {{
+            window.typeaheadRegistry['{component_id}'].callHandler('fetch', query, syncResults, asyncResults);
+        }} catch (e) {{
+            console.error('[JS] Error calling fetch handler through registry:', e);
             syncResults([]);
         }}
         "#, component_id = component_id)
@@ -908,9 +980,14 @@ fn initialize_typeahead(
         r#"
         console.log('[JS] Starting Typeahead init for #{input_id}');
         try {{
-            // Get the component from registry
+            // DEFENSIVE: Check if registry exists and component is alive
             if (!window.typeaheadRegistry || !window.typeaheadRegistry['{component_id}']) {{
                 throw new Error('Component not found in registry: {component_id}');
+            }}
+            
+            // DEFENSIVE: Check alive flag explicitly
+            if (!window.typeaheadRegistry['{component_id}'].alive) {{
+                throw new Error('Component {component_id} is no longer alive');
             }}
             
             // Get the bloodhound instance from the registry
@@ -925,6 +1002,9 @@ fn initialize_typeahead(
                 throw new Error('Input element not found: #{input_id}');
             }}
             
+            // DEFENSIVE: Remove any existing typeahead to prevent duplicate handlers
+            $input.typeahead('destroy');
+            
             $input.typeahead(
                 {{
                     hint: true,
@@ -938,6 +1018,20 @@ fn initialize_typeahead(
                         return data.displayLabel || data.label || '';
                     }},
                     source: function(query, syncResults, asyncResults) {{
+                        // DEFENSIVE: Check if registry exists and component is alive
+                        if (!window.typeaheadRegistry || !window.typeaheadRegistry['{component_id}']) {{
+                            console.warn('[JS] Component registry not found for {component_id}, returning empty results');
+                            syncResults([]);
+                            return;
+                        }}
+                        
+                        // DEFENSIVE: Check alive flag explicitly
+                        if (!window.typeaheadRegistry['{component_id}'].alive) {{
+                            console.warn('[JS] Component {component_id} is no longer alive, returning empty results');
+                            syncResults([]);
+                            return;
+                        }}
+                        
                         // Call the fetch handler through the registry
                         window.typeaheadRegistry['{component_id}'].callHandler('fetch', query, syncResults, asyncResults);
                     }},
@@ -957,6 +1051,18 @@ fn initialize_typeahead(
                 }}
             )
             .on('typeahead:select', function(ev, suggestion) {{
+                // DEFENSIVE: Check if registry exists and component is alive
+                if (!window.typeaheadRegistry || !window.typeaheadRegistry['{component_id}']) {{
+                    console.warn('[JS] Component registry not found for {component_id}, ignoring selection event');
+                    return;
+                }}
+                
+                // DEFENSIVE: Check alive flag explicitly
+                if (!window.typeaheadRegistry['{component_id}'].alive) {{
+                    console.warn('[JS] Component {component_id} is no longer alive, ignoring selection event');
+                    return;
+                }}
+                
                 if (!suggestion) {{
                     console.error('[JS] Selection event received with null suggestion');
                     return;
