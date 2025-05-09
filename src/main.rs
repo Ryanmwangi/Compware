@@ -5,6 +5,7 @@ use tokio::sync::Mutex;
 use compareware::db::Database;
 use compareware::api::{ItemRequest, create_item, get_items, get_selected_properties, add_selected_property};
 use compareware::models::item::Item;
+use compareware::utils::panic_hook;
 
 #[cfg(feature = "ssr")]
 #[actix_web::main]
@@ -18,6 +19,8 @@ async fn main() -> std::io::Result<()> {
     use compareware::api::{delete_item, delete_property}; // Import API handlers
     use std::sync::Arc;
     use tokio::sync::Mutex;
+
+    panic_hook::init();
     
     // Setup logging
     std::env::set_var("RUST_LOG", "info");
@@ -167,12 +170,15 @@ pub fn main() {
 
 #[cfg(all(not(feature = "ssr"), feature = "csr"))]
 pub fn main() {
+    // Initialize custom panic hook for better diagnostics
+    panic_hook::init();
+
     // a client-side main function is required for using `trunk serve`
     // prefer using `cargo leptos serve` instead
     // to run: `trunk serve --open --features csr`
     use compareware::app::*;
 
-    console_error_panic_hook::set_once();
+    // console_error_panic_hook::set_once();
 
     leptos::mount_to_body(App);
 }
