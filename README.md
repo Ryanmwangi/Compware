@@ -99,6 +99,56 @@ sequenceDiagram
    ```
 3. Access the application at: [http://localhost:3004](http://localhost:3004)
 
+
+## **Running Tests**
+
+CompareWare uses both native Rust tests and WebAssembly (WASM) tests for browser-based components.
+
+### **Native Rust Tests**
+To run native Rust tests (for server-side or non-WASM code):
+
+```bash
+cargo test
+```
+
+### **WASM (Browser) Tests**
+
+To run tests for browser-based (Leptos/WASM) components, you need to use [`wasm-pack`](https://rustwasm.github.io/wasm-pack/installer/):
+
+1. **Install wasm-pack** (if you haven't already):
+
+   ```bash
+   cargo install wasm-pack
+   ```
+
+2. **Run tests in a headless browser (Chrome or Firefox):**
+
+   ```bash
+   wasm-pack test --headless --chrome --features wasm-test --no-default-features
+   ```
+
+   Or, for Firefox:
+
+   ```bash
+   wasm-pack test --headless --firefox --features wasm-test --no-default-features
+   ```
+
+3. **Run tests in Node.js** (if your tests do not require a browser environment):
+
+   ```bash
+   wasm-pack test --node --features wasm-test --no-default-features
+   ```
+
+#### **Notes**
+- Make sure your test functions are annotated with `#[wasm_bindgen_test]` for WASM tests.
+- If you add new test files, place them in the `tests/` directory or as modules in `src/` as appropriate.
+- Warnings about unused variables or imports can be ignored unless they affect test results.
+
+---
+
+For more details on WASM testing, see the [wasm-bindgen-test documentation](https://rustwasm.github.io/wasm-bindgen/wasm-bindgen-test/usage.html).
+
+
 ### **Collaboration**
 We welcome contributions! Here’s how you can help:
 
