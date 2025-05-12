@@ -2,8 +2,11 @@
 use actix_web::{web, HttpResponse, Responder};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+#[cfg(feature = "ssr")]
 use compareware::db::Database;
+#[cfg(feature = "ssr")]
 use compareware::api::{ItemRequest, create_item, get_items, get_selected_properties, add_selected_property};
+#[cfg(feature = "ssr")]
 use compareware::models::item::Item;
 use compareware::utils::panic_hook;
 
