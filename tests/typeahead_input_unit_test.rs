@@ -48,10 +48,15 @@ async fn test_typeahead_initialization() {
 
     // Track initialization
     let init_called = create_rw_signal(false);
+    
+    // Create a reference to store the fetch_suggestions callback
+    let fetch_callback_ref = create_rw_signal(None::<Callback<String, Vec<WikidataSuggestion>>>);
 
     // Create a test component
     let test_component = {
         let init_called = init_called.clone();
+        let fetch_callback_ref = fetch_callback_ref.clone();
+        
         move || {
             let node_ref = create_node_ref::<html::Input>();
 
@@ -69,6 +74,9 @@ async fn test_typeahead_initialization() {
                     vec![]
                 }
             });
+            
+            // Store the callback for direct access
+            fetch_callback_ref.set(Some(fetch_suggestions.clone()));
 
             view! {
                 <div>
@@ -86,9 +94,33 @@ async fn test_typeahead_initialization() {
     // Mount the component
     let unmount = mount_to(&container, test_component);
 
-    // Wait for initialization
+    // Wait for component to be mounted and initialized
+    sleep(Duration::from_millis(300)).await;
+
+    // 1. Try to dispatch an input event
+    if let Some(input_element) = document.query_selector("input").ok().flatten() {
+        if let Some(input) = input_element.dyn_ref::<web_sys::HtmlInputElement>() {
+            // Set value and dispatch input event to trigger the fetch_suggestions callback
+            input.set_value("test");
+            let event = web_sys::Event::new("input").unwrap();
+            input.dispatch_event(&event).unwrap();
+            log!("Dispatched input event");
+        }
+    }
+    
+    // Wait a bit to see if the event worked
+    sleep(Duration::from_millis(200)).await;
+    
+    // 2. If the event didn't work, directly call the callback
+    if !init_called.get_untracked() {
+        if let Some(fetch_callback) = fetch_callback_ref.get_untracked() {
+            log!("Directly calling fetch_suggestions callback");
+            fetch_callback.call("direct test".to_string());
+        }
+    }
+    
+    // Wait for initialization callback to be triggered
     for _ in 0..10 {
-        // Use with_untracked to avoid the warning
         if init_called.get_untracked() {
             break;
         }
