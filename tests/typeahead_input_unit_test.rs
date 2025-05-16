@@ -6,6 +6,9 @@ use gloo_timers::future::sleep;
 use compareware::components::typeahead_input::TypeaheadInput;
 use compareware::models::item::WikidataSuggestion;
 use wasm_bindgen::JsCast;
+use std::rc::Rc;
+use std::cell::RefCell;
+use gloo_timers::future::TimeoutFuture;
 
 // Import mock module
 mod mocks;
@@ -267,6 +270,272 @@ async fn test_rapid_mount_unmount() {
 
     // Cleanup
     document.body().unwrap().remove_child(&container).unwrap();
+}
+
+// Memory Leak Regression Test
+
+/// Helper to count registry entries and global handlers in JS
+async fn get_js_leak_stats() -> (u32, u32) {
+    let js = r#"
+        (function() {
+            let reg = window.typeaheadRegistry;
+            let regCount = reg ? Object.keys(reg).length : 0;
+            let handlerCount = 0;
+            for (let k in window) {
+                if (k.startsWith('rustSelectHandler_') || k.startsWith('rustFetchHandler_')) {
+                    if (window[k]) handlerCount++;
+                }
+            }
+            return [regCount, handlerCount];
+        })()
+    "#;
+    let arr = js_sys::eval(js).unwrap();
+    let arr = js_sys::Array::from(&arr);
+    let reg_count = arr.get(0).as_f64().unwrap_or(0.0) as u32;
+    let handler_count = arr.get(1).as_f64().unwrap_or(0.0) as u32;
+    (reg_count, handler_count)
+}
+
+#[wasm_bindgen_test]
+async fn test_typeahead_memory_leak_on_rapid_cycles() {
+    // Setup test environment
+    setup_test_environment().await;
+
+    let document = web_sys::window().unwrap().document().unwrap();
+    let container = document.create_element("div").unwrap();
+    document.body().unwrap().append_child(&container).unwrap();
+    container.set_id("leak-test-container");
+
+    // Run several mount/unmount cycles
+    let cycles = 10;
+    for i in 0..cycles {
+        log!("Mount/unmount cycle {}", i);
+
+        let test_component = move || {
+            let node_ref = create_node_ref::<leptos::html::Input>();
+            let on_select = Callback::new(move |_: WikidataSuggestion| {});
+            let fetch_suggestions = Callback::new(move |_: String| vec![]);
+            view! {
+                <div>
+                    <TypeaheadInput
+                        value="".to_string()
+                        on_select=on_select
+                        fetch_suggestions=fetch_suggestions
+                        node_ref=node_ref
+                    />
+                </div>
+            }.into_view()
+        };
+
+        // Mount
+        let unmount = mount_to(&container, test_component);
+
+        // Wait briefly for JS initialization
+        sleep(Duration::from_millis(100)).await;
+
+        // Unmount
+        unmount();
+
+        // Wait for cleanup
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    // Wait for any pending JS cleanup
+    sleep(Duration::from_millis(500)).await;
+
+    // Check for leaks
+    let (reg_count, handler_count) = get_js_leak_stats().await;
+    log!("After {} cycles: registry entries = {}, handler count = {}", cycles, reg_count, handler_count);
+
+    // Assert no registry entries or global handlers remain
+    assert_eq!(reg_count, 0, "JS registry should be empty after cleanup");
+    assert_eq!(handler_count, 0, "No global handlers should remain after cleanup");
+
+    // Cleanup DOM
+    document.body().unwrap().remove_child(&container).unwrap();
+}
+
+// Lifecycle tests
+fn create_mock_suggestion() -> compareware::models::item::WikidataSuggestion {
+    compareware::models::item::WikidataSuggestion {
+        id: "Q12345".to_string(),
+        label: "Test Item".to_string(),
+        title: "Test Title".to_string(),
+        description: "Test Description".to_string(),
+        display: compareware::models::item::DisplayInfo {
+            label: compareware::models::item::LabelInfo {
+                value: "Test Item".to_string(),
+                language: "en".to_string(),
+            },
+            description: compareware::models::item::DescriptionInfo {
+                value: "Test Description".to_string(),
+                language: "en".to_string(),
+            },
+        },
+    }
+}
+
+// Helper function to create a test component
+fn create_test_component() -> (NodeRef<leptos::html::Input>, Rc<RefCell<Option<WikidataSuggestion>>>) {
+    let node_ref = create_node_ref::<leptos::html::Input>();
+    let selected_suggestion = Rc::new(RefCell::new(None));
+    
+    let selected_suggestion_clone = selected_suggestion.clone();
+    let on_select = Callback::new(move |suggestion: WikidataSuggestion| {
+        *selected_suggestion_clone.borrow_mut() = Some(suggestion);
+    });
+    
+    let fetch_suggestions = Callback::new(|query: String| {
+        if query.is_empty() {
+            return vec![];
+        }
+        
+        vec![create_mock_suggestion()]
+    });
+    
+    mount_to_body(move || {
+        view! {
+            <div>
+                <TypeaheadInput
+                    value="".to_string()
+                    on_select=on_select
+                    fetch_suggestions=fetch_suggestions
+                    node_ref=node_ref
+                />
+            </div>
+        }
+    });
+    
+    (node_ref, selected_suggestion)
+}
+#[wasm_bindgen_test]
+async fn test_multiple_component_lifecycle() {
+    // Create first component
+    let (node_ref1, _) = create_test_component();
+    
+    // Wait for initialization
+    TimeoutFuture::new(500).await;
+    
+    // Create second component
+    let (node_ref2, _) = create_test_component();
+    
+    // Wait for initialization
+    TimeoutFuture::new(500).await;
+    
+    // Both should be initialized
+    assert!(node_ref1.get().is_some());
+    assert!(node_ref2.get().is_some());
+    
+    // Clean up first component explicitly
+    leptos::document().body().unwrap().first_element_child().unwrap().remove();
+    
+    // Wait for cleanup
+    TimeoutFuture::new(500).await;
+    
+    // Second component should still be valid
+    assert!(node_ref2.get().is_some());
+    
+    // Check if the registry has been properly maintained
+    let js_check = js_sys::eval(r#"
+        // Check if typeahead registry exists and has components
+        if (window.typeaheadRegistry) {
+            // Count alive components
+            let aliveCount = 0;
+            for (let id in window.typeaheadRegistry) {
+                if (window.typeaheadRegistry[id].alive) {
+                    aliveCount++;
+                }
+            }
+            aliveCount;
+        } else {
+            0
+        }
+    "#).unwrap();
+    
+    // Should have exactly one alive component
+    assert_eq!(js_check.as_f64().unwrap_or(0.0), 1.0);
+}
+
+#[wasm_bindgen_test]
+async fn test_component_refresh_scenario() {
+    // This test simulates the scenario where components are refreshed
+    
+    // First round of components
+    let components = (0..3).map(|_| create_test_component()).collect::<Vec<_>>();
+    
+    // Wait for initialization
+    TimeoutFuture::new(500).await;
+    
+    // Verify all are initialized
+    for (node_ref, _) in &components {
+        assert!(node_ref.get().is_some());
+    }
+    
+    // Clean up all components
+    leptos::document()
+        .body()
+        .expect("document should have a body")
+        .dyn_ref::<web_sys::HtmlElement>()
+        .expect("body should be an HtmlElement")
+        .set_inner_html("");
+    
+    // Wait for cleanup
+    TimeoutFuture::new(500).await;
+    
+    // Create new components
+    let new_components = (0..3).map(|_| create_test_component()).collect::<Vec<_>>();
+    
+    // Wait for initialization
+    TimeoutFuture::new(500).await;
+    
+    // Verify all new components are initialized
+    for (node_ref, _) in &new_components {
+        assert!(node_ref.get().is_some());
+    }
+    
+    // Check registry health
+    let js_check = js_sys::eval(r#"
+        // Check registry health
+        let result = {
+            registryExists: !!window.typeaheadRegistry,
+            totalComponents: 0,
+            aliveComponents: 0,
+            globalHandlers: 0
+        };
+        
+        if (window.typeaheadRegistry) {
+            result.totalComponents = Object.keys(window.typeaheadRegistry).length;
+            
+            for (let id in window.typeaheadRegistry) {
+                if (window.typeaheadRegistry[id].alive) {
+                    result.aliveComponents++;
+                }
+            }
+        }
+        
+        // Count global handlers
+        for (let key in window) {
+            if (key.startsWith('rustSelectHandler_') || key.startsWith('rustFetchHandler_')) {
+                result.globalHandlers++;
+            }
+        }
+        
+        JSON.stringify(result);
+    "#).unwrap();
+    
+    let registry_info = js_check.as_string().unwrap();
+    console_log!("Registry health: {}", registry_info);
+    
+    // Parse the JSON
+    let registry_obj: serde_json::Value = serde_json::from_str(&registry_info).unwrap();
+    
+    // Verify registry health
+    assert!(registry_obj["registryExists"].as_bool().unwrap());
+    assert_eq!(registry_obj["aliveComponents"].as_i64().unwrap(), 3);
+    assert_eq!(registry_obj["totalComponents"].as_i64().unwrap(), 3);
+    
+    // Global handlers should match the number of components
+    assert_eq!(registry_obj["globalHandlers"].as_i64().unwrap(), 6); // 2 handlers per component
 }
 
 // Helper function to mount a component to a container
