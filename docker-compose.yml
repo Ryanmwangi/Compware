@@ -8,4 +8,8 @@ services:
     environment:
       - RUST_LOG=info
       - LEPTOS_ENV=production
+      - LEPTOS_SITE_ADDR=0.0.0.0:3004
+      - LEPTOS_SITE_ROOT=site
+      - LEPTOS_OUTPUT_NAME=compareware
+      - LEPTOS_OPTIONS={"site_addr":"0.0.0.0:3004"}
     restart: unless-stopped

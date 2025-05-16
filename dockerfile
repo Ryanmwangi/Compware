@@ -28,6 +28,8 @@ COPY . .
 RUN rustup target add wasm32-unknown-unknown
 # Build project
 ENV LEPTOS_OUTPUT_NAME="compareware"
+ENV LEPTOS_SITE_ADDR="0.0.0.0:3004"
+ENV LEPTOS_SITE_ROOT="site"
 
 # Build with release profile
 RUN cargo leptos build --release
@@ -51,6 +53,7 @@ COPY assets /app/assets
 # Configure container, expose port and set entrypoint
 WORKDIR /app 
 EXPOSE 3004
-ENV LEPTOS_SITE_ADDR=0.0.0.0:3004
+ENV LEPTOS_SITE_ADDR="0.0.0.0:3004"
 ENV LEPTOS_SITE_ROOT="site"
+ENV LEPTOS_OPTIONS='{"site_addr":"0.0.0.0:3004"}'
 CMD ["./compareware"]
