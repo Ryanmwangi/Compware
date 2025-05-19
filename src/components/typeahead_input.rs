@@ -99,12 +99,25 @@ pub fn TypeaheadInput(
     node_ref: NodeRef<Input>,
     #[prop(optional)] is_last_row: bool,
     #[prop(optional)] on_input: Option<Callback<String>>,
+    #[prop(optional)] should_focus: bool,
 ) -> impl IntoView {
     let (is_initialized, set_initialized) = create_signal(false);
     
     // Create a unique ID for this component instance
     let component_id = format!("typeahead-{}", uuid::Uuid::new_v4());
     
+    // Clone component_id before moving it into the closure
+    let component_id_for_effect = component_id.clone();
+    // Effect to handle focus when should_focus is true
+    create_effect(move |_| {
+        if should_focus {
+            if let Some(input) = node_ref.get() {
+                let _ = input.focus();
+                log!("[FOCUS] Auto-focusing input: {}", component_id_for_effect);
+            }
+        }
+    });
+
     // WASM-specific initialization
     #[cfg(target_arch = "wasm32")]
     {
