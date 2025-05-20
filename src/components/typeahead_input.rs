@@ -532,10 +532,8 @@ pub fn TypeaheadInput(
                 log!("[INPUT] Value changed: {} ({})", value, component_id_for_input);
                 
                 // If this is the last row and we have an on_input callback, call it
-                if is_last_row && !value.is_empty() {
-                    if let Some(callback) = &on_input {
-                        callback.call(value.clone());
-                    }
+                if let Some(callback) = &on_input {
+                    callback.call(value.clone());
                 }
             }
         />

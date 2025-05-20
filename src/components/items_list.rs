@@ -144,9 +144,11 @@ pub fn ItemsList(
 
     let (suggestions, set_suggestions) = create_signal(Vec::<WikidataSuggestion>::new());
 
-    // Add a state to track which input field should be focused after re-render
-    let (focus_index, set_focus_index) = create_signal(None::<usize>);
+    // Add a state to track when we're adding a new row
     let (adding_new_row, set_adding_new_row) = create_signal(false);
+
+    // Track the length of the items array to detect when a new row is added
+    let (prev_items_len, set_prev_items_len) = create_signal(0);
 
     #[cfg(feature = "ssr")]
     fn get_current_url() -> String {
@@ -760,14 +762,28 @@ pub fn ItemsList(
     let update_item = {
         let set_items = set_items.clone();
         let current_url = Rc::clone(&current_url);
-        let set_focus_index = set_focus_index.clone();
         let set_adding_new_row = set_adding_new_row.clone();
-
+        let set_prev_items_len = set_prev_items_len.clone();
+        
         Arc::new(move |index: usize, field: &str, value: String| {
             let set_items = set_items.clone();
             let current_url = Rc::clone(&current_url);
-            let set_focus_index = set_focus_index.clone();
             let set_adding_new_row = set_adding_new_row.clone();
+            let set_prev_items_len = set_prev_items_len.clone();
+            
+            // Store the current length before updating
+            let current_len = items.get().len();
+            set_prev_items_len.set(current_len);
+            
+            // Check if this is the last row and we're about to add a new one
+            let is_last_row = index == current_len - 1;
+            let will_add_new_row = is_last_row && !value.is_empty() && field == "name";
+            
+            // Set the flag if we're about to add a new row
+            if will_add_new_row {
+                set_adding_new_row.set(true);
+                log!("[FOCUS] Setting adding_new_row flag to true");
+            }
 
             set_items.update(move|items| {
                 if let Some(item) = items.get_mut(index) {
@@ -807,12 +823,6 @@ pub fn ItemsList(
                 }
                 // Automatically add a new row when editing the last row
                 if index == items.len() - 1 && !value.is_empty() {
-                    // Set flag that we're adding a new row and need to maintain focus
-                    set_adding_new_row.set(true);
-                    
-                    // Remember which index we were editing
-                    set_focus_index.set(Some(index));
-
                     let new_item = Item {
                         id: Uuid::new_v4().to_string(),
                         name: String::new(),
@@ -880,29 +890,35 @@ pub fn ItemsList(
                                             {match property {
                                                 "Name" => {
                                                     let node_ref = create_node_ref::<Input>();
-                                                    
-                                                    // Determine if this input should be focused
-                                                    let should_focus = move || {
-                                                        if adding_new_row.get() {
-                                                            if let Some(focus_idx) = focus_index.get() {
-                                                                // Focus the input that was being edited before adding a new row
-                                                                focus_idx == index
-                                                            } else {
-                                                                false
-                                                            }
-                                                        } else {
-                                                            false
-                                                        }
-                                                    };
-                                                    
-                                                    // Create an effect to reset the adding_new_row flag after rendering
+                                                                                                
+                                                    // Clone items.len() before creating the closure to avoid borrowing issues
+                                                    let items_len = items.len();
+                                                                                                
+                                                    // Create a signal to track whether this specific input should be focused
+                                                    let (should_focus_this, set_should_focus_this) = create_signal(false);
+                                                                                                
+                                                    let items_clone = items.clone();
+                                                    // Determine if this input should be focused based on the adding_new_row flag and indices
                                                     create_effect(move |_| {
-                                                        if adding_new_row.get() && should_focus() {
-                                                            // Reset the flags after focus is applied
-                                                            set_timeout(move || {
-                                                                set_adding_new_row.set(false);
-                                                                set_focus_index.set(None);
-                                                            }, std::time::Duration::from_millis(50));
+                                                        // Only run this effect when adding_new_row changes to true
+                                                        if adding_new_row.get() {
+                                                            // Check if a new row was actually added
+                                                            let current_len = items_clone.len(); 
+                                                            let prev_len = prev_items_len.get();
+                                                            
+                                                            if current_len > prev_len {
+                                                                // This is the input that was being edited before adding a new row
+                                                                let should_focus = index == prev_len - 1;
+                                                                set_should_focus_this.set(should_focus);
+                                                                
+                                                                // Reset the adding_new_row flag after a short delay if this is the input that should be focused
+                                                                if should_focus {
+                                                                    set_timeout(move || {
+                                                                        set_adding_new_row.set(false);
+                                                                        log!("[FOCUS] Reset adding_new_row flag to false");
+                                                                    }, std::time::Duration::from_millis(50));
+                                                                }
+                                                            }
                                                         }
                                                     });
                                                     
@@ -959,17 +975,18 @@ pub fn ItemsList(
                                                                     });
                                                                 }
                                                             })
-                                                            is_last_row={index == items.len() - 1}
+                                                            is_last_row={index == items_len - 1}
                                                             on_input=Callback::new({
                                                                 let update_item_clone = Arc::clone(&update_item_clone);
                                                                 
                                                                 move |value: String| {
-                                                                    // Update the item with the new value
+                                                                    // Always update the item with the new value
+                                                                    // The update_item function will handle setting the adding_new_row flag
                                                                     update_item_clone(index, "name", value);
                                                                 }
                                                             })
                                                             node_ref=node_ref
-                                                            should_focus=should_focus()
+                                                            should_focus=should_focus_this.get()
                                                         />
                                                         </div>
                                                     }.into_view()
