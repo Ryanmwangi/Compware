@@ -444,10 +444,36 @@ pub fn TypeaheadInput(
 
     // CSS styles for the typeahead input
     let css = r#"
+        .typeahead-input,
         .typeahead.tt-input {
-            background: transparent !important;
+            width: 100%;
+            height: 100%;
+            border: none;
+            padding: 8px;
+            box-sizing: border-box;
+            font-size: 14px;
+            text-align: left;
+            outline: none;
+            background-color: transparent;
         }
 
+        .typeahead-input:focus,
+        .typeahead.tt-input:focus,
+        input.typeahead-input:focus,
+        input.typeahead.tt-input:focus,
+        .twitter-typeahead .typeahead-input:focus,
+        .twitter-typeahead .typeahead.tt-input:focus {
+            background-color: #e0f7fa !important;
+            border: 1px solid #00796b !important;
+            outline: none !important;
+        }
+
+        .twitter-typeahead {
+            width: 100%;
+            height: 100%;
+            display: block !important;
+        }
+        
         .tt-menu {
             width: 100% !important;
             background: white;
