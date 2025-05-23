@@ -883,10 +883,13 @@ pub fn ItemsList(
                                                             let property_cache_clone = property_cache.clone();
                                                             let set_property_cache_clone = set_property_cache.clone();
                                                             let property_labels_clone = property_labels.clone();
+                                                            let current_url_clone = Rc::clone(&current_url_clone);
+                                                            let selected_properties_clone = selected_properties.clone();
+                                                            let items_len = items.len(); // Get the current items length
 
                                                             move |suggestion: WikidataSuggestion| {
                                                                 let wikidata_id = suggestion.id.clone();
-
+                                                            
                                                                 set_items_clone.update(|items| {
                                                                     if let Some(item) = items.get_mut(index) {
                                                                         item.name = suggestion.display.label.value.clone();
@@ -894,14 +897,14 @@ pub fn ItemsList(
                                                                         item.wikidata_id = Some(wikidata_id.clone());
                                                                     }
                                                                 });
-
+                                                            
                                                                 // Fetch properties in a separate task
                                                                 let set_property_labels_for_task = set_property_labels_clone.clone();
                                                                 let property_cache_for_task = property_cache_clone.clone();
                                                                 let set_property_cache_for_task = set_property_cache_clone.clone();
                                                                 let property_labels_for_task = property_labels_clone.clone();
                                                                 let wikidata_id_for_task = wikidata_id.clone();
-
+                                                            
                                                                 spawn_local(async move {
                                                                     fetch_item_properties(
                                                                         &wikidata_id_for_task,
@@ -911,32 +914,12 @@ pub fn ItemsList(
                                                                         property_labels_for_task
                                                                     ).await;
                                                                 });
-                                                            }
-                                                        })
-                                                        is_last_row={index == items.len() - 1}
-                                                        on_input=Callback::new({
-                                                            // Clone items.len() before moving into the closure
-                                                            let items_len = items.len();
-                                                            let set_items_clone = set_items.clone();
-                                                            let current_url_clone = Rc::clone(&current_url_clone);
-                                                            let selected_properties_clone = selected_properties.clone();
-                                                            let node_ref_clone = node_ref.clone(); // Clone the node_ref for later use
-
-                                                            move |value: String| {
-                                                                if index == items_len - 1 && !value.is_empty() {
-                                                                    // Store the current active element before modifying the DOM
-                                                                    let document = web_sys::window().unwrap().document().unwrap();
-                                                                    let active_element_id = document
-                                                                        .active_element()
-                                                                        .map(|el| el.id())
-                                                                        .unwrap_or_default();
-
-                                                                    // Store the current input value
-                                                                    let input_value = value.clone();
-
+                                                            
+                                                                // Add a new row if this is the last row
+                                                                if index == items_len - 1 {
                                                                     let current_url_for_new_item = Rc::clone(&current_url_clone);
                                                                     let selected_properties_for_new_item = selected_properties_clone.clone();
-
+                                                                
                                                                     set_items_clone.update(|items| {
                                                                         let new_item = Item {
                                                                             id: Uuid::new_v4().to_string(),
@@ -951,7 +934,7 @@ pub fn ItemsList(
                                                                         let new_item_clone = new_item.clone();
                                                                         let current_url_for_task = Rc::clone(&current_url_for_new_item);
                                                                         let selected_properties_for_task = selected_properties_for_new_item;
-
+                                                                    
                                                                         spawn_local(async move {
                                                                             save_item_to_db(
                                                                                 new_item_clone, 
@@ -960,59 +943,18 @@ pub fn ItemsList(
                                                                             ).await;
                                                                         });
                                                                     });
-
-                                                                    // Schedule focus restoration after the DOM has been updated
-                                                                    spawn_local(async move {
-                                                                        // Small delay to ensure DOM is updated
-                                                                        gloo_timers::future::TimeoutFuture::new(50).await;
-
-                                                                        // Try to restore focus to the element that had it
-                                                                        if !active_element_id.is_empty() {
-                                                                            if let Some(element) = document.get_element_by_id(&active_element_id) {
-                                                                                if let Some(input) = element.dyn_ref::<web_sys::HtmlInputElement>() {
-                                                                                    // Set the value before focusing to preserve what was typed
-                                                                                    input.set_value(&input_value);
-                                                                                    let _ = input.focus();
-
-                                                                                    // Trigger the typeahead to show suggestions
-                                                                                    let trigger_typeahead_script = format!(
-                                                                                        r#"
-                                                                                        try {{
-                                                                                            // Get the input element
-                                                                                            var $input = $('#{}');
-                                                                                            if ($input.length > 0) {{
-                                                                                                // Manually trigger the typeahead query
-                                                                                                $input.typeahead('val', '{}');
-
-                                                                                                // Force the menu to open
-                                                                                                setTimeout(function() {{
-                                                                                                    var event = new Event('input', {{
-                                                                                                        bubbles: true,
-                                                                                                        cancelable: true,
-                                                                                                    }});
-                                                                                                    $input[0].dispatchEvent(event);
-                                                                                                }}, 100);
-                                                                                            }}
-                                                                                        }} catch(e) {{
-                                                                                            console.error('Error triggering typeahead:', e);
-                                                                                        }}
-                                                                                        "#,
-                                                                                        active_element_id,
-                                                                                        input_value.replace("'", "\\'") // Escape single quotes
-                                                                                    );
-
-                                                                                    // Execute the script after a short delay to ensure typeahead is initialized
-                                                                                    gloo_timers::future::TimeoutFuture::new(200).await;
-                                                                                    let _ = js_sys::eval(&trigger_typeahead_script);
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                    });
                                                                 }
                                                             }
                                                         })
-                                                        node_ref=node_ref.clone() // Use the node_ref to track this input
-                                                        id=format!("name-input-{}", index) // Add a unique ID to each input
+                                                        is_last_row={index == items.len() - 1}
+                                                        on_input=Callback::new({
+
+                                                            move |value: String| {
+                                                                
+                                                            }
+                                                        })
+                                                        node_ref=node_ref.clone()
+                                                        id=format!("name-input-{}", index)
                                                     />
                                                     </div>
                                                 }.into_view(),
