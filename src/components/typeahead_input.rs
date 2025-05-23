@@ -99,24 +99,15 @@ pub fn TypeaheadInput(
     node_ref: NodeRef<Input>,
     #[prop(optional)] is_last_row: bool,
     #[prop(optional)] on_input: Option<Callback<String>>,
-    #[prop(optional)] should_focus: bool,
+    #[prop(optional)] id: Option<String>,
 ) -> impl IntoView {
     let (is_initialized, set_initialized) = create_signal(false);
     
     // Create a unique ID for this component instance
     let component_id = format!("typeahead-{}", uuid::Uuid::new_v4());
     
-    // Clone component_id before moving it into the closure
-    let component_id_for_effect = component_id.clone();
-    // Effect to handle focus when should_focus is true
-    create_effect(move |_| {
-        if should_focus {
-            if let Some(input) = node_ref.get() {
-                let _ = input.focus();
-                log!("[FOCUS] Auto-focusing input: {}", component_id_for_effect);
-            }
-        }
-    });
+    // Use the provided id or generate one
+    let input_id = id.unwrap_or_else(|| format!("typeahead-input-{}", component_id));
 
     // WASM-specific initialization
     #[cfg(target_arch = "wasm32")]
@@ -525,6 +516,7 @@ pub fn TypeaheadInput(
             class="typeahead-input"
             prop:value=value
             node_ref=node_ref
+            id={input_id}
             on:focus=move |_| log!("[FOCUS] Name input focused: {}", component_id_for_focus)
             on:blur=move |_| log!("[FOCUS] Name input blurred: {}", component_id_for_blur)
             on:input=move |ev| {
@@ -532,8 +524,10 @@ pub fn TypeaheadInput(
                 log!("[INPUT] Value changed: {} ({})", value, component_id_for_input);
                 
                 // If this is the last row and we have an on_input callback, call it
-                if let Some(callback) = &on_input {
-                    callback.call(value.clone());
+                if is_last_row && !value.is_empty() {
+                    if let Some(callback) = &on_input {
+                        callback.call(value.clone());
+                    }
                 }
             }
         />
@@ -840,7 +834,7 @@ fn initialize_typeahead(
     closures: Rc<RefCell<TypeaheadClosures>>,
 ) -> Result<(), JsValue> {
     log!("[TYPEAHEAD] Initializing for input: {} ({})", input.id(), component_id);
-    let input_id = format!("typeahead-input-{}", component_id);
+    let input_id = input.id();
     input.set_id(&input_id);
 
     // Get a clone of the is_alive flag for use in the closure

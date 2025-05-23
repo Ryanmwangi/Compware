@@ -143,13 +143,6 @@ pub fn ItemsList(
     let (property_cache, set_property_cache) = create_signal(HashMap::<String, HashMap<String, String>>::new());
 
     let (suggestions, set_suggestions) = create_signal(Vec::<WikidataSuggestion>::new());
-
-    // Add a state to track when we're adding a new row
-    let (adding_new_row, set_adding_new_row) = create_signal(false);
-
-    // Track the length of the items array to detect when a new row is added
-    let (prev_items_len, set_prev_items_len) = create_signal(0);
-
     #[cfg(feature = "ssr")]
     fn get_current_url() -> String {
         use leptos::use_context;
@@ -762,89 +755,68 @@ pub fn ItemsList(
     let update_item = {
         let set_items = set_items.clone();
         let current_url = Rc::clone(&current_url);
-        let set_adding_new_row = set_adding_new_row.clone();
-        let set_prev_items_len = set_prev_items_len.clone();
-        
         Arc::new(move |index: usize, field: &str, value: String| {
-            let set_items = set_items.clone();
-            let current_url = Rc::clone(&current_url);
-            let set_adding_new_row = set_adding_new_row.clone();
-            let set_prev_items_len = set_prev_items_len.clone();
-            
-            // Store the current length before updating
-            let current_len = items.get().len();
-            set_prev_items_len.set(current_len);
-            
-            // Check if this is the last row and we're about to add a new one
-            let is_last_row = index == current_len - 1;
-            let will_add_new_row = is_last_row && !value.is_empty() && field == "name";
-            
-            // Set the flag if we're about to add a new row
-            if will_add_new_row {
-                set_adding_new_row.set(true);
-                log!("[FOCUS] Setting adding_new_row flag to true");
-            }
+        let set_items = set_items.clone();
+        let current_url = Rc::clone(&current_url);
+        set_items.update(move|items| {
+            if let Some(item) = items.get_mut(index) {
+                match field {
+                    "name" => {
+                        item.name = value.clone();
+                        fetch_wikidata_suggestions(format!("name-{}", index), value.clone());
 
-            set_items.update(move|items| {
-                if let Some(item) = items.get_mut(index) {
-                    match field {
-                        "name" => {
-                            item.name = value.clone();
-                            fetch_wikidata_suggestions(format!("name-{}", index), value.clone());
-
-                            // Fetch Wikidata properties if the field is "name" and the item has a valid Wikidata ID
-                            if !value.is_empty() {
-                                if let Some(wikidata_id) = &item.wikidata_id {
-                                    let wikidata_id = wikidata_id.clone();
-                                    spawn_local(async move {
-                                        let properties = fetch_item_properties(&wikidata_id, set_property_labels.clone(), property_cache.clone(), set_property_cache.clone(), property_labels.clone()).await;
-                                        log!("Fetched properties for index {}: {:?}", index, properties);
-                                    });
-                                }
+                        // Fetch Wikidata properties if the field is "name" and the item has a valid Wikidata ID
+                        if !value.is_empty() {
+                            if let Some(wikidata_id) = &item.wikidata_id {
+                                let wikidata_id = wikidata_id.clone();
+                                spawn_local(async move {
+                                    let properties = fetch_item_properties(&wikidata_id, set_property_labels.clone(), property_cache.clone(), set_property_cache.clone(), property_labels.clone()).await;
+                                    log!("Fetched properties for index {}: {:?}", index, properties);
+                                });
                             }
                         }
-                        "description" => {
-                            item.description = value.clone();
-                        }
-                        _ => {
-                            // Update custom property
-                            item.custom_properties.insert(field.to_string(), value.clone());
-                        }
                     }
-
-                    // Save the updated item to the database
-                    let item_clone = item.clone();
-                    spawn_local({
-                        let current_url = Rc::clone(&current_url);
-                        async move {
-                            save_item_to_db(item_clone, selected_properties, current_url.to_string()).await;
-                        }
-                    });
+                    "description" => {
+                        item.description = value.clone();
+                    }
+                    _ => {
+                        // Update custom property
+                        item.custom_properties.insert(field.to_string(), value.clone());
+                    }
                 }
-                // Automatically add a new row when editing the last row
-                if index == items.len() - 1 && !value.is_empty() {
-                    let new_item = Item {
-                        id: Uuid::new_v4().to_string(),
-                        name: String::new(),
-                        description: String::new(),
-                        // reviews: vec![],
-                        wikidata_id: None,
-                        custom_properties: HashMap::new(),
-                    };
-                    items.push(new_item.clone());
 
-                    // Save the new item to the database
-                    spawn_local({
-                        let current_url = Rc::clone(&current_url);
-                        async move {
-                            save_item_to_db(new_item, selected_properties, current_url.to_string()).await;
-                        }
-                    });
-                }
-                log!("Items updated: {:?}", items);
-            });
-        })
-    };
+                // Save the updated item to the database
+                let item_clone = item.clone();
+                spawn_local({
+                    let current_url = Rc::clone(&current_url);
+                    async move {
+                        save_item_to_db(item_clone, selected_properties, current_url.to_string()).await;
+                    }
+                });
+            }
+            // Automatically add a new row when editing the last row
+            if index == items.len() - 1 && !value.is_empty() {
+                let new_item = Item {
+                    id: Uuid::new_v4().to_string(),
+                    name: String::new(),
+                    description: String::new(),
+                    // reviews: vec![],
+                    wikidata_id: None,
+                    custom_properties: HashMap::new(),
+                };
+                items.push(new_item.clone());
+
+                // Save the new item to the database
+                spawn_local({
+                    let current_url = Rc::clone(&current_url);
+                    async move {
+                        save_item_to_db(new_item, selected_properties, current_url.to_string()).await;
+                    }
+                });
+            }
+            log!("Items updated: {:?}", items);
+        });
+    })};
 
     // List of properties to display as rows
     let properties = vec!["Name", "Description"];
@@ -888,109 +860,162 @@ pub fn ItemsList(
                                         view! {
                                             <td>
                                             {match property {
-                                                "Name" => {
-                                                    let node_ref = create_node_ref::<Input>();
-                                                                                                
-                                                    // Clone items.len() before creating the closure to avoid borrowing issues
-                                                    let items_len = items.len();
-                                                                                                
-                                                    // Create a signal to track whether this specific input should be focused
-                                                    let (should_focus_this, set_should_focus_this) = create_signal(false);
-                                                                                                
-                                                    let items_clone = items.clone();
-                                                    // Determine if this input should be focused based on the adding_new_row flag and indices
-                                                    create_effect(move |_| {
-                                                        // Only run this effect when adding_new_row changes to true
-                                                        if adding_new_row.get() {
-                                                            // Check if a new row was actually added
-                                                            let current_len = items_clone.len(); 
-                                                            let prev_len = prev_items_len.get();
-                                                            
-                                                            if current_len > prev_len {
-                                                                // This is the input that was being edited before adding a new row
-                                                                let should_focus = index == prev_len - 1;
-                                                                set_should_focus_this.set(should_focus);
-                                                                
-                                                                // Reset the adding_new_row flag after a short delay if this is the input that should be focused
-                                                                if should_focus {
-                                                                    set_timeout(move || {
-                                                                        set_adding_new_row.set(false);
-                                                                        log!("[FOCUS] Reset adding_new_row flag to false");
-                                                                    }, std::time::Duration::from_millis(50));
-                                                                }
+                                                "Name" => view! {
+                                                    <div class="typeahead-container">
+                                                    <TypeaheadInput
+                                                        value=item.name.clone()
+                                                        fetch_suggestions=Callback::new({
+                                                            let key = format!("name-{}", index);
+                                                            let wikidata_suggestions_clone = wikidata_suggestions.clone();
+
+                                                            move |query: String| -> Vec<WikidataSuggestion> {
+                                                                // Fetch suggestions in a separate function to avoid capturing too much
+                                                                fetch_wikidata_suggestions(key.clone(), query.clone());
+
+                                                                // Return current suggestions from the signal
+                                                                let suggestions = wikidata_suggestions_clone.get();
+                                                                suggestions.get(&key).cloned().unwrap_or_default()
                                                             }
-                                                        }
-                                                    });
-                                                    
-                                                    view! {
-                                                        <div class="typeahead-container">
-                                                        <TypeaheadInput
-                                                            value=item.name.clone()
-                                                            fetch_suggestions=Callback::new({
-                                                                let key = format!("name-{}", index);
-                                                                let wikidata_suggestions_clone = wikidata_suggestions.clone();
-                                                                
-                                                                move |query: String| -> Vec<WikidataSuggestion> {
-                                                                    // Fetch suggestions in a separate function to avoid capturing too much
-                                                                    fetch_wikidata_suggestions(key.clone(), query.clone());
-                                                                    
-                                                                    // Return current suggestions from the signal
-                                                                    let suggestions = wikidata_suggestions_clone.get();
-                                                                    suggestions.get(&key).cloned().unwrap_or_default()
-                                                                }
-                                                            })
-                                                            on_select=Callback::new({
-                                                                let set_items_clone = set_items.clone();
-                                                                let set_property_labels_clone = set_property_labels.clone();
-                                                                let property_cache_clone = property_cache.clone();
-                                                                let set_property_cache_clone = set_property_cache.clone();
-                                                                let property_labels_clone = property_labels.clone();
-                                                                
-                                                                move |suggestion: WikidataSuggestion| {
-                                                                    let wikidata_id = suggestion.id.clone();
-                                                                    
+                                                        })
+                                                        on_select=Callback::new({
+                                                            let set_items_clone = set_items.clone();
+                                                            let set_property_labels_clone = set_property_labels.clone();
+                                                            let property_cache_clone = property_cache.clone();
+                                                            let set_property_cache_clone = set_property_cache.clone();
+                                                            let property_labels_clone = property_labels.clone();
+
+                                                            move |suggestion: WikidataSuggestion| {
+                                                                let wikidata_id = suggestion.id.clone();
+
+                                                                set_items_clone.update(|items| {
+                                                                    if let Some(item) = items.get_mut(index) {
+                                                                        item.name = suggestion.display.label.value.clone();
+                                                                        item.description = suggestion.display.description.value.clone();
+                                                                        item.wikidata_id = Some(wikidata_id.clone());
+                                                                    }
+                                                                });
+
+                                                                // Fetch properties in a separate task
+                                                                let set_property_labels_for_task = set_property_labels_clone.clone();
+                                                                let property_cache_for_task = property_cache_clone.clone();
+                                                                let set_property_cache_for_task = set_property_cache_clone.clone();
+                                                                let property_labels_for_task = property_labels_clone.clone();
+                                                                let wikidata_id_for_task = wikidata_id.clone();
+
+                                                                spawn_local(async move {
+                                                                    fetch_item_properties(
+                                                                        &wikidata_id_for_task,
+                                                                        set_property_labels_for_task,
+                                                                        property_cache_for_task,
+                                                                        set_property_cache_for_task,
+                                                                        property_labels_for_task
+                                                                    ).await;
+                                                                });
+                                                            }
+                                                        })
+                                                        is_last_row={index == items.len() - 1}
+                                                        on_input=Callback::new({
+                                                            // Clone items.len() before moving into the closure
+                                                            let items_len = items.len();
+                                                            let set_items_clone = set_items.clone();
+                                                            let current_url_clone = Rc::clone(&current_url_clone);
+                                                            let selected_properties_clone = selected_properties.clone();
+                                                            let node_ref_clone = node_ref.clone(); // Clone the node_ref for later use
+
+                                                            move |value: String| {
+                                                                if index == items_len - 1 && !value.is_empty() {
+                                                                    // Store the current active element before modifying the DOM
+                                                                    let document = web_sys::window().unwrap().document().unwrap();
+                                                                    let active_element_id = document
+                                                                        .active_element()
+                                                                        .map(|el| el.id())
+                                                                        .unwrap_or_default();
+
+                                                                    // Store the current input value
+                                                                    let input_value = value.clone();
+
+                                                                    let current_url_for_new_item = Rc::clone(&current_url_clone);
+                                                                    let selected_properties_for_new_item = selected_properties_clone.clone();
+
                                                                     set_items_clone.update(|items| {
-                                                                        if let Some(item) = items.get_mut(index) {
-                                                                            item.name = suggestion.display.label.value.clone();
-                                                                            item.description = suggestion.display.description.value.clone();
-                                                                            item.wikidata_id = Some(wikidata_id.clone());
+                                                                        let new_item = Item {
+                                                                            id: Uuid::new_v4().to_string(),
+                                                                            name: String::new(),
+                                                                            description: String::new(),
+                                                                            wikidata_id: None,
+                                                                            custom_properties: HashMap::new(),
+                                                                        };
+                                                                        items.push(new_item.clone());
+                                                                    
+                                                                        // Save the new item to the database in a separate task
+                                                                        let new_item_clone = new_item.clone();
+                                                                        let current_url_for_task = Rc::clone(&current_url_for_new_item);
+                                                                        let selected_properties_for_task = selected_properties_for_new_item;
+
+                                                                        spawn_local(async move {
+                                                                            save_item_to_db(
+                                                                                new_item_clone, 
+                                                                                selected_properties_for_task, 
+                                                                                current_url_for_task.to_string()
+                                                                            ).await;
+                                                                        });
+                                                                    });
+
+                                                                    // Schedule focus restoration after the DOM has been updated
+                                                                    spawn_local(async move {
+                                                                        // Small delay to ensure DOM is updated
+                                                                        gloo_timers::future::TimeoutFuture::new(50).await;
+
+                                                                        // Try to restore focus to the element that had it
+                                                                        if !active_element_id.is_empty() {
+                                                                            if let Some(element) = document.get_element_by_id(&active_element_id) {
+                                                                                if let Some(input) = element.dyn_ref::<web_sys::HtmlInputElement>() {
+                                                                                    // Set the value before focusing to preserve what was typed
+                                                                                    input.set_value(&input_value);
+                                                                                    let _ = input.focus();
+
+                                                                                    // Trigger the typeahead to show suggestions
+                                                                                    let trigger_typeahead_script = format!(
+                                                                                        r#"
+                                                                                        try {{
+                                                                                            // Get the input element
+                                                                                            var $input = $('#{}');
+                                                                                            if ($input.length > 0) {{
+                                                                                                // Manually trigger the typeahead query
+                                                                                                $input.typeahead('val', '{}');
+
+                                                                                                // Force the menu to open
+                                                                                                setTimeout(function() {{
+                                                                                                    var event = new Event('input', {{
+                                                                                                        bubbles: true,
+                                                                                                        cancelable: true,
+                                                                                                    }});
+                                                                                                    $input[0].dispatchEvent(event);
+                                                                                                }}, 100);
+                                                                                            }}
+                                                                                        }} catch(e) {{
+                                                                                            console.error('Error triggering typeahead:', e);
+                                                                                        }}
+                                                                                        "#,
+                                                                                        active_element_id,
+                                                                                        input_value.replace("'", "\\'") // Escape single quotes
+                                                                                    );
+
+                                                                                    // Execute the script after a short delay to ensure typeahead is initialized
+                                                                                    gloo_timers::future::TimeoutFuture::new(200).await;
+                                                                                    let _ = js_sys::eval(&trigger_typeahead_script);
+                                                                                }
+                                                                            }
                                                                         }
                                                                     });
-                                                                    
-                                                                    // Fetch properties in a separate task
-                                                                    let set_property_labels_for_task = set_property_labels_clone.clone();
-                                                                    let property_cache_for_task = property_cache_clone.clone();
-                                                                    let set_property_cache_for_task = set_property_cache_clone.clone();
-                                                                    let property_labels_for_task = property_labels_clone.clone();
-                                                                    let wikidata_id_for_task = wikidata_id.clone();
-                                                                    
-                                                                    spawn_local(async move {
-                                                                        fetch_item_properties(
-                                                                            &wikidata_id_for_task,
-                                                                            set_property_labels_for_task,
-                                                                            property_cache_for_task,
-                                                                            set_property_cache_for_task,
-                                                                            property_labels_for_task
-                                                                        ).await;
-                                                                    });
                                                                 }
-                                                            })
-                                                            is_last_row={index == items_len - 1}
-                                                            on_input=Callback::new({
-                                                                let update_item_clone = Arc::clone(&update_item_clone);
-                                                                
-                                                                move |value: String| {
-                                                                    // Always update the item with the new value
-                                                                    // The update_item function will handle setting the adding_new_row flag
-                                                                    update_item_clone(index, "name", value);
-                                                                }
-                                                            })
-                                                            node_ref=node_ref
-                                                            should_focus=should_focus_this.get()
-                                                        />
-                                                        </div>
-                                                    }.into_view()
-                                                },
+                                                            }
+                                                        })
+                                                        node_ref=node_ref.clone() // Use the node_ref to track this input
+                                                        id=format!("name-input-{}", index) // Add a unique ID to each input
+                                                    />
+                                                    </div>
+                                                }.into_view(),
                                             
                                                 "Description" => view! {
                                                 <EditableCell
