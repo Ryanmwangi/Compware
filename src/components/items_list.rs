@@ -925,37 +925,43 @@ pub fn ItemsList(
                                                                     ).await;
                                                                 });
                                                             
-                                                                // Add a new row if this is the last row - in a separate update call
+                                                                // Add a new row if this is the last row
                                                                 if index == items_len - 1 {
-                                                                    // First, create a completely new item
-                                                                    let new_item = Item {
-                                                                        id: Uuid::new_v4().to_string(),
-                                                                        name: String::new(),
-                                                                        description: String::new(),
-                                                                        wikidata_id: None,
-                                                                        custom_properties: HashMap::new(),
-                                                                    };
-
-                                                                    // Clone for database save
-                                                                    let new_item_clone = new_item.clone();
-                                                                    let current_url_for_new_item = Rc::clone(&current_url_clone);
-                                                                    let selected_properties_for_new_item = selected_properties_clone.clone();
-
-                                                                    // Add the new item in a separate update to force re-rendering
-                                                                    set_items_clone.update(|items| {
-                                                                        items.push(new_item);
-                                                                    });
+                                                                    // Clone before moving into the async block
+                                                                    let set_items_for_new_item = set_items_clone.clone();
+                                                                    let current_url_for_async = Rc::clone(&current_url_clone);
+                                                                    let selected_properties_for_async = selected_properties_clone.clone();
                                                                 
-                                                                    // Save the new item to the database in a separate task
-                                                                    let current_url_for_task = Rc::clone(&current_url_for_new_item);
-                                                                    let selected_properties_for_task = selected_properties_for_new_item;
-                                                                
+                                                                    // Use a small delay to ensure clean component lifecycle
                                                                     spawn_local(async move {
-                                                                        save_item_to_db(
-                                                                            new_item_clone, 
-                                                                            selected_properties_for_task, 
-                                                                            current_url_for_task.to_string()
-                                                                        ).await;
+                                                                        // Wait for the current update to complete and component to stabilize
+                                                                        gloo_timers::future::TimeoutFuture::new(10).await;
+                                                                    
+                                                                        // Create a new item with empty values
+                                                                        let new_item = Item {
+                                                                            id: Uuid::new_v4().to_string(),
+                                                                            name: String::new(),
+                                                                            description: String::new(),
+                                                                            wikidata_id: None,
+                                                                            custom_properties: HashMap::new(),
+                                                                        };
+                                                                    
+                                                                        // Clone for database save
+                                                                        let new_item_clone = new_item.clone();
+                                                                    
+                                                                        // Add the new item in a separate update to force re-rendering
+                                                                        set_items_for_new_item.update(|items| {
+                                                                            items.push(new_item);
+                                                                        });
+                                                                    
+                                                                        // Save the new item to the database in a separate task
+                                                                        spawn_local(async move {
+                                                                            save_item_to_db(
+                                                                                new_item_clone, 
+                                                                                selected_properties_for_async, 
+                                                                                current_url_for_async.to_string()
+                                                                            ).await;
+                                                                        });
                                                                     });
                                                                 }
                                                             }
