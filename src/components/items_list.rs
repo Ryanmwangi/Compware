@@ -865,13 +865,22 @@ pub fn ItemsList(
                                                     <TypeaheadInput
                                                         value=item.name.clone()
                                                         fetch_suggestions=Callback::new({
-                                                            let key = format!("name-{}", index);
+                                                            // Use the item's unique ID in the key to ensure uniqueness
+                                                            let key = format!("name-{}-{}", index, item.id);
                                                             let wikidata_suggestions_clone = wikidata_suggestions.clone();
 
                                                             move |query: String| -> Vec<WikidataSuggestion> {
-                                                                // Fetch suggestions in a separate function to avoid capturing too much
-                                                                fetch_wikidata_suggestions(key.clone(), query.clone());
-
+                                                                // Only fetch suggestions if the query is not empty
+                                                                if !query.is_empty() {
+                                                                    // Fetch suggestions in a separate function to avoid capturing too much
+                                                                    fetch_wikidata_suggestions(key.clone(), query.clone());
+                                                                } else {
+                                                                    // Clear suggestions for this key if query is empty
+                                                                    set_wikidata_suggestions.update(|suggestions| {
+                                                                        suggestions.remove(&key);
+                                                                    });
+                                                                }
+                                                            
                                                                 // Return current suggestions from the signal
                                                                 let suggestions = wikidata_suggestions_clone.get();
                                                                 suggestions.get(&key).cloned().unwrap_or_default()
@@ -885,11 +894,12 @@ pub fn ItemsList(
                                                             let property_labels_clone = property_labels.clone();
                                                             let current_url_clone = Rc::clone(&current_url_clone);
                                                             let selected_properties_clone = selected_properties.clone();
-                                                            let items_len = items.len(); // Get the current items length
+                                                            let items_len = items.len();
 
                                                             move |suggestion: WikidataSuggestion| {
                                                                 let wikidata_id = suggestion.id.clone();
                                                             
+                                                                // Update the current item with the selected suggestion
                                                                 set_items_clone.update(|items| {
                                                                     if let Some(item) = items.get_mut(index) {
                                                                         item.name = suggestion.display.label.value.clone();
@@ -915,33 +925,37 @@ pub fn ItemsList(
                                                                     ).await;
                                                                 });
                                                             
-                                                                // Add a new row if this is the last row
+                                                                // Add a new row if this is the last row - in a separate update call
                                                                 if index == items_len - 1 {
+                                                                    // First, create a completely new item
+                                                                    let new_item = Item {
+                                                                        id: Uuid::new_v4().to_string(),
+                                                                        name: String::new(),
+                                                                        description: String::new(),
+                                                                        wikidata_id: None,
+                                                                        custom_properties: HashMap::new(),
+                                                                    };
+
+                                                                    // Clone for database save
+                                                                    let new_item_clone = new_item.clone();
                                                                     let current_url_for_new_item = Rc::clone(&current_url_clone);
                                                                     let selected_properties_for_new_item = selected_properties_clone.clone();
-                                                                
+
+                                                                    // Add the new item in a separate update to force re-rendering
                                                                     set_items_clone.update(|items| {
-                                                                        let new_item = Item {
-                                                                            id: Uuid::new_v4().to_string(),
-                                                                            name: String::new(),
-                                                                            description: String::new(),
-                                                                            wikidata_id: None,
-                                                                            custom_properties: HashMap::new(),
-                                                                        };
-                                                                        items.push(new_item.clone());
-                                                                    
-                                                                        // Save the new item to the database in a separate task
-                                                                        let new_item_clone = new_item.clone();
-                                                                        let current_url_for_task = Rc::clone(&current_url_for_new_item);
-                                                                        let selected_properties_for_task = selected_properties_for_new_item;
-                                                                    
-                                                                        spawn_local(async move {
-                                                                            save_item_to_db(
-                                                                                new_item_clone, 
-                                                                                selected_properties_for_task, 
-                                                                                current_url_for_task.to_string()
-                                                                            ).await;
-                                                                        });
+                                                                        items.push(new_item);
+                                                                    });
+                                                                
+                                                                    // Save the new item to the database in a separate task
+                                                                    let current_url_for_task = Rc::clone(&current_url_for_new_item);
+                                                                    let selected_properties_for_task = selected_properties_for_new_item;
+                                                                
+                                                                    spawn_local(async move {
+                                                                        save_item_to_db(
+                                                                            new_item_clone, 
+                                                                            selected_properties_for_task, 
+                                                                            current_url_for_task.to_string()
+                                                                        ).await;
                                                                     });
                                                                 }
                                                             }
@@ -954,7 +968,7 @@ pub fn ItemsList(
                                                             }
                                                         })
                                                         node_ref=node_ref.clone()
-                                                        id=format!("name-input-{}", index)
+                                                        id=format!("name-input-{}-{}", index, item.id)
                                                     />
                                                     </div>
                                                 }.into_view(),
