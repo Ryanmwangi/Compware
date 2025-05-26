@@ -100,7 +100,8 @@ pub fn TypeaheadInput(
     #[prop(optional)] is_last_row: bool,
     #[prop(optional)] on_input: Option<Callback<String>>,
     #[prop(optional)] id: Option<String>,
-) -> impl IntoView {
+    #[prop(optional)] key: Option<String>,
+) -> impl IntoView {    
     let (is_initialized, set_initialized) = create_signal(false);
     
     // Create a unique ID for this component instance
@@ -523,12 +524,12 @@ pub fn TypeaheadInput(
                 let value = event_target_value(&ev);
                 log!("[INPUT] Value changed: {} ({})", value, component_id_for_input);
                 
-                // If this is the last row and we have an on_input callback, call it
-                if is_last_row && !value.is_empty() {
-                    if let Some(callback) = &on_input {
-                        callback.call(value.clone());
-                    }
-                }
+                // // If this is the last row and we have an on_input callback, call it
+                // if is_last_row && !value.is_empty() {
+                //     if let Some(callback) = &on_input {
+                //         callback.call(value.clone());
+                //     }
+                // }
             }
         />
     }
