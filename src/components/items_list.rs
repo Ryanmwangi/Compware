@@ -852,6 +852,7 @@ pub fn ItemsList(
                                 let current_url_for_inner = Rc::clone(&current_url_for_closure);
                                 
                                 move || {
+                                    let items_signal = items;
                                     let items = items.get();
                                     items.iter().enumerate().map(|(index, item)| {
                                         let update_item_clone = Arc::clone(&update_item_cloned);
@@ -863,6 +864,7 @@ pub fn ItemsList(
                                                 "Name" => view! {
                                                     <div class="typeahead-container">
                                                     <TypeaheadInput
+                                                        key=item.id.clone()
                                                         value=item.name.clone()
                                                         fetch_suggestions=Callback::new({
                                                             // Use the item's unique ID in the key to ensure uniqueness
@@ -895,18 +897,29 @@ pub fn ItemsList(
                                                             let current_url_clone = Rc::clone(&current_url_clone);
                                                             let selected_properties_clone = selected_properties.clone();
                                                             let items_len = items.len();
+                                                            let item_id = item.id.clone();
+                                                            let current_index = index;
 
                                                             move |suggestion: WikidataSuggestion| {
                                                                 let wikidata_id = suggestion.id.clone();
                                                             
                                                                 // Update the current item with the selected suggestion
                                                                 set_items_clone.update(|items| {
-                                                                    if let Some(item) = items.get_mut(index) {
-                                                                        item.name = suggestion.display.label.value.clone();
-                                                                        item.description = suggestion.display.description.value.clone();
-                                                                        item.wikidata_id = Some(wikidata_id.clone());
+                                                                    // Use the index directly to ensure we're updating the right item
+                                                                    if let Some(item) = items.get_mut(current_index) {
+                                                                        // Double-check the ID matches to ensure we're updating the right item
+                                                                        if item.id == item_id {
+                                                                            item.name = suggestion.display.label.value.clone();
+                                                                            item.description = suggestion.display.description.value.clone();
+                                                                            item.wikidata_id = Some(wikidata_id.clone());
+                                                                        }
                                                                     }
                                                                 });
+
+                                                                // Check if this is the last item using current state
+                                                                let is_last_item = items_signal.get().last()
+                                                                    .map(|last| last.id == item_id)
+                                                                    .unwrap_or(false);
                                                             
                                                                 // Fetch properties in a separate task
                                                                 let set_property_labels_for_task = set_property_labels_clone.clone();
@@ -926,7 +939,7 @@ pub fn ItemsList(
                                                                 });
                                                             
                                                                 // Add a new row if this is the last row
-                                                                if index == items_len - 1 {
+                                                                if is_last_item {
                                                                     // Clone before moving into the async block
                                                                     let set_items_for_new_item = set_items_clone.clone();
                                                                     let current_url_for_async = Rc::clone(&current_url_clone);
