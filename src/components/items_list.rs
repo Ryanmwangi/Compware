@@ -896,24 +896,29 @@ pub fn ItemsList(
                                                             let property_labels_clone = property_labels.clone();
                                                             let current_url_clone = Rc::clone(&current_url_clone);
                                                             let selected_properties_clone = selected_properties.clone();
-                                                            let items_len = items.len();
                                                             let item_id = item.id.clone();
                                                             let current_index = index;
 
                                                             move |suggestion: WikidataSuggestion| {
                                                                 let wikidata_id = suggestion.id.clone();
+                                                                log!("on_select called for item_id={}, index={}", item_id, current_index);
                                                             
                                                                 // Update the current item with the selected suggestion
                                                                 set_items_clone.update(|items| {
+                                                                    log!("Items before update: {:?}", items.iter().map(|i| &i.id).collect::<Vec<_>>());
                                                                     // Use the index directly to ensure we're updating the right item
-                                                                    if let Some(item) = items.get_mut(current_index) {
-                                                                        // Double-check the ID matches to ensure we're updating the right item
+                                                                    if let Some(item) = items.iter_mut().find(|item| item.id == item_id) {
+                                                                        log!("Updating item with id={}", item.id);
+                                                                        // Double-check the ID matches to ensure we're updating the rlog!("Creating new item with id={}", new_item.id);ight item
                                                                         if item.id == item_id {
                                                                             item.name = suggestion.display.label.value.clone();
                                                                             item.description = suggestion.display.description.value.clone();
                                                                             item.wikidata_id = Some(wikidata_id.clone());
                                                                         }
+                                                                    }  else {
+                                                                        log!("No item found with id={}", item_id);
                                                                     }
+                                                                    log!("Items after update: {:?}", items.iter().map(|i| &i.id).collect::<Vec<_>>());
                                                                 });
 
                                                                 // Check if this is the last item using current state
@@ -958,6 +963,8 @@ pub fn ItemsList(
                                                                             wikidata_id: None,
                                                                             custom_properties: HashMap::new(),
                                                                         };
+
+                                                                        log!("Creating new item with id={}", new_item.id);
                                                                     
                                                                         // Clone for database save
                                                                         let new_item_clone = new_item.clone();
