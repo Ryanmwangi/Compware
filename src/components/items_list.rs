@@ -127,6 +127,9 @@ pub fn ItemsList(
     // State to track the currently focused cell
     let (focused_cell, set_focused_cell) = create_signal(None::<String>);
 
+    // State to track the currently focused item ID
+    let (focused_item_id, set_focused_item_id) = create_signal(None::<String>);
+
     // State to manage dynamic property names
     let (custom_properties, set_custom_properties) = create_signal(Vec::<String>::new());
     
@@ -143,6 +146,18 @@ pub fn ItemsList(
     let (property_cache, set_property_cache) = create_signal(HashMap::<String, HashMap<String, String>>::new());
 
     let (suggestions, set_suggestions) = create_signal(Vec::<WikidataSuggestion>::new());
+    
+    // Set initial focus to the first item if it exists
+    create_effect(move |_| {
+        let items_list = items.get();
+        if let Some(first_item) = items_list.first() {
+            if focused_item_id.get().is_none() {
+                log!("Setting initial focus to first item: {}", first_item.id);
+                set_focused_item_id.set(Some(first_item.id.clone()));
+            }
+        }
+    });
+    
     #[cfg(feature = "ssr")]
     fn get_current_url() -> String {
         use leptos::use_context;
@@ -862,7 +877,18 @@ pub fn ItemsList(
                                             <td>
                                             {match property {
                                                 "Name" => view! {
-                                                    <div class="typeahead-container">
+                                                    <div class="typeahead-container"
+                                                        // click handler at the container level
+                                                        on:click={
+                                                            let item_id = item.id.clone();
+                                                            let set_focused_item_id = set_focused_item_id.clone();
+                                                            
+                                                            move |_| {
+                                                                log!("Container clicked: item_id={}", item_id);
+                                                                set_focused_item_id.set(Some(item_id.clone()));
+                                                            }
+                                                        }
+                                                    >
                                                     <TypeaheadInput
                                                         key=item.id.clone()
                                                         value=item.name.clone()
@@ -896,33 +922,44 @@ pub fn ItemsList(
                                                             let property_labels_clone = property_labels.clone();
                                                             let current_url_clone = Rc::clone(&current_url_clone);
                                                             let selected_properties_clone = selected_properties.clone();
+                                                            let items_signal_clone = items_signal.clone();
+                                                            let focused_item_id_clone = focused_item_id.clone();
+                                                            let set_focused_item_id = set_focused_item_id.clone();
                                                             let item_id = item.id.clone();
-                                                            let current_index = index;
 
                                                             move |suggestion: WikidataSuggestion| {
                                                                 let wikidata_id = suggestion.id.clone();
-                                                                log!("on_select called for item_id={}, index={}", item_id, current_index);
+
+                                                                // Get the currently focused item ID
+                                                                let current_item_id = focused_item_id_clone.get()
+                                                                    .unwrap_or_else(|| {
+                                                                        // Set it for future use
+                                                                        set_focused_item_id.set(Some(item_id.clone()));
+                                                                        item_id.clone()
+                                                                    });
+
+                                                                log!("on_select called for focused_item_id={:?}", current_item_id);
                                                             
-                                                                // Update the current item with the selected suggestion
+                                                                // Update the item with the focused ID
+                                                               
                                                                 set_items_clone.update(|items| {
                                                                     log!("Items before update: {:?}", items.iter().map(|i| &i.id).collect::<Vec<_>>());
-                                                                    // Use the index directly to ensure we're updating the right item
-                                                                    if let Some(item) = items.iter_mut().find(|item| item.id == item_id) {
+                                                                    
+                                                                    // Find the item by ID
+                                                                    if let Some(item) = items.iter_mut().find(|item| item.id == current_item_id) {
                                                                         log!("Updating item with id={}", item.id);
-                                                                        // Double-check the ID matches to ensure we're updating the rlog!("Creating new item with id={}", new_item.id);ight item
-                                                                        if item.id == item_id {
-                                                                            item.name = suggestion.display.label.value.clone();
-                                                                            item.description = suggestion.display.description.value.clone();
-                                                                            item.wikidata_id = Some(wikidata_id.clone());
-                                                                        }
-                                                                    }  else {
+                                                                        item.name = suggestion.display.label.value.clone();
+                                                                        item.description = suggestion.display.description.value.clone();
+                                                                        item.wikidata_id = Some(wikidata_id.clone());
+                                                                    } else {
                                                                         log!("No item found with id={}", item_id);
                                                                     }
+                                                                    
                                                                     log!("Items after update: {:?}", items.iter().map(|i| &i.id).collect::<Vec<_>>());
                                                                 });
-
-                                                                // Check if this is the last item using current state
-                                                                let is_last_item = items_signal.get().last()
+                                                                // Check if this is the last item
+                                                                let items_vec = items_signal_clone.get();
+                                                                let is_last_item = items_vec.last()
                                                                     .map(|last| last.id == item_id)
                                                                     .unwrap_or(false);
                                                             
@@ -963,7 +1000,6 @@ pub fn ItemsList(
                                                                             wikidata_id: None,
                                                                             custom_properties: HashMap::new(),
                                                                         };
-
                                                                         log!("Creating new item with id={}", new_item.id);
                                                                     
                                                                         // Clone for database save
@@ -984,13 +1020,23 @@ pub fn ItemsList(
                                                                         });
                                                                     });
                                                                 }
+                                                                
                                                             }
                                                         })
                                                         is_last_row={index == items.len() - 1}
                                                         on_input=Callback::new({
-
                                                             move |value: String| {
-                                                                
+                                                                // Input handling logic
+                                                            }
+                                                        })
+                                                        on_focus=Callback::new({
+                                                            // Update the focused item ID when input receives focus
+                                                            let item_id = item.id.clone();
+                                                            let set_focused_item_id = set_focused_item_id.clone();
+                                                            
+                                                            move |_| {
+                                                                log!("Name input focused: item_id={}", item_id);
+                                                                set_focused_item_id.set(Some(item_id.clone()));
                                                             }
                                                         })
                                                         node_ref=node_ref.clone()

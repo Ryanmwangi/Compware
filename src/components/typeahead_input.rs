@@ -99,6 +99,8 @@ pub fn TypeaheadInput(
     node_ref: NodeRef<Input>,
     #[prop(optional)] is_last_row: bool,
     #[prop(optional)] on_input: Option<Callback<String>>,
+    #[prop(optional)] on_focus: Option<Callback<()>>,
+    #[prop(optional)] on_blur: Option<Callback<()>>,
     #[prop(optional)] id: Option<String>,
     #[prop(optional)] key: Option<String>,
 ) -> impl IntoView {    
