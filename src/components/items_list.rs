@@ -960,7 +960,7 @@ pub fn ItemsList(
                                                                 // Check if this is the last item
                                                                 let items_vec = items_signal_clone.get();
                                                                 let is_last_item = items_vec.last()
-                                                                    .map(|last| last.id == item_id)
+                                                                    .map(|last| last.id == current_item_id)
                                                                     .unwrap_or(false);
                                                             
                                                                 // Fetch properties in a separate task
@@ -1000,7 +1000,9 @@ pub fn ItemsList(
                                                                             wikidata_id: None,
                                                                             custom_properties: HashMap::new(),
                                                                         };
-                                                                        log!("Creating new item with id={}", new_item.id);
+
+                                                                        let new_item_id = new_item.id.clone();
+                                                                        log!("Creating new item with id={}", new_item_id);
                                                                     
                                                                         // Clone for database save
                                                                         let new_item_clone = new_item.clone();
