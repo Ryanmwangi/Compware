@@ -375,32 +375,38 @@ pub fn ItemsList(
     let (wikidata_suggestions, set_wikidata_suggestions) = create_signal(HashMap::<String, Vec<WikidataSuggestion>>::new());
 
     // Function to fetch Wikidata suggestions
-    let fetch_wikidata_suggestions = move |key: String, query: String| {
-        log!("Fetching suggestions for key: {}, query: {}", key, query);
-        spawn_local(async move {
-            if query.is_empty() {
-                set_wikidata_suggestions.update(|suggestions| {
-                    suggestions.remove(&key);
-                });
-                return;
-            }
+    let fetch_wikidata_suggestions = {
+        let set_wikidata_suggestions = set_wikidata_suggestions.clone();
+        
+        move |key: String, query: String| {
+            log!("Fetching suggestions for key: {}, query: {}", key, query);
+            let set_wikidata_suggestions_clone = set_wikidata_suggestions.clone();
 
-            let url = format!(
-                "https://www.wikidata.org/w/api.php?action=wbsearchentities&search={}&language=en&limit=5&format=json&origin=*",
-                query
-            );
-
-            match gloo_net::http::Request::get(&url).send().await {
-                Ok(response) => {
-                    if let Ok(data) = response.json::<WikidataResponse>().await {
-                        set_wikidata_suggestions.update(|suggestions| {
-                            suggestions.insert(key, data.search);
-                        });
-                    }
+            spawn_local(async move {
+                if query.is_empty() {
+                    set_wikidata_suggestions_clone.update(|suggestions| {
+                        suggestions.remove(&key);
+                    });
+                    return;
                 }
-                Err(_) => log!("Failed to fetch Wikidata suggestions"),
-            }
-        });
+
+                let url = format!(
+                    "https://www.wikidata.org/w/api.php?action=wbsearchentities&search={}&language=en&limit=5&format=json&origin=*",
+                    query
+                );
+
+                match gloo_net::http::Request::get(&url).send().await {
+                    Ok(response) => {
+                        if let Ok(data) = response.json::<WikidataResponse>().await {
+                            set_wikidata_suggestions_clone.update(|suggestions| {
+                                suggestions.insert(key, data.search);
+                            });
+                        }
+                    }
+                    Err(_) => log!("Failed to fetch Wikidata suggestions"),
+                }
+            });
+        }
     };
 
     //function to fetch properties
@@ -1027,70 +1033,89 @@ pub fn ItemsList(
                                                         })
                                                         is_last_row={index == items.len() - 1}
                                                         on_input=Callback::new({
+                                                            let item_id = item.id.clone();
+                                                            let input_id = format!("name-input-{}-{}", index, item.id);
+                                                            let key = format!("name-{}-{}", index, item.id);
+
+                                                            // Create a direct reference to fetch_wikidata_suggestions
+                                                            let fetch_wikidata_suggestions_clone = fetch_wikidata_suggestions.clone();
+
                                                             move |value: String| {
-                                                                // Input handling logic
+                                                                // Trigger the Rust-side fetch
+                                                                fetch_wikidata_suggestions_clone(key.clone(), value.clone());
+
+                                                                // Force Bloodhound to update
+                                                                let js_code = format!(
+                                                                    r#"
+                                                                    try {{
+                                                                        // Get the input element
+                                                                        const inputElement = document.getElementById("{}");
+                                                                        if (!inputElement) {{
+                                                                            console.error("[RUST] Input element not found:", "{}");
+                                                                            return;
+                                                                        }}
+
+                                                                        // Set the value and trigger an input event
+                                                                        inputElement.value = "{}";
+                                                                        const event = new Event("input", {{ bubbles: true }});
+                                                                        inputElement.dispatchEvent(event);
+
+                                                                        console.log("[RUST] Triggered input event for {} with value: {}", "{}", "{}");
+                                                                    }} catch (e) {{
+                                                                        console.error("[RUST] Error triggering input event:", e);
+                                                                    }}
+                                                                    "#,
+                                                                    input_id, input_id, 
+                                                                    value,
+                                                                    input_id, value, input_id, value
+                                                                );
+
+                                                                // Execute the JavaScript
+                                                                let _ = js_sys::eval(&js_code);
                                                             }
                                                         })
+                                                        
                                                         on_focus=Callback::new({
-                                                            // Update the focused item ID when input receives focus
                                                             let item_id = item.id.clone();
                                                             let set_focused_item_id = set_focused_item_id.clone();
                                                             let input_id = format!("name-input-{}-{}", index, item.id);
-                                                                                                                
+
                                                             move |_| {
                                                                 log!("Name input focused: item_id={}", item_id);
                                                                 set_focused_item_id.set(Some(item_id.clone()));
                                                             
-                                                                // Force Bloodhound to initialize/reinitialize
+                                                                // Simplified JavaScript code to reinitialize Bloodhound
                                                                 let js_code = format!(
-                                                                    r#"
+                                                                    r##"
                                                                     try {{
-                                                                        console.log("[DEBUG] Input focused:", "{}");
-                                                                        
                                                                         // Get the input element
                                                                         const inputElement = document.getElementById("{}");
                                                                         if (!inputElement) {{
-                                                                            console.error("[DEBUG] Input element not found:", "{}");
+                                                                            console.error("[RUST] Input element not found:", "{}");
                                                                             return;
                                                                         }}
-                                                                        
-                                                                        // Check if Bloodhound is initialized
-                                                                        if (!window.bloodhoundInstances || !window.bloodhoundInstances["{}"]) {{
-                                                                            console.warn("[DEBUG] Bloodhound not initialized for {}, attempting to reinitialize", "{}");
-                                                                            
-                                                                            // Try to reinitialize Bloodhound
-                                                                            if (typeof window.initTypeahead === "function") {{
-                                                                                window.initTypeahead("{}", "{}");
-                                                                                console.log("[DEBUG] Reinitialized Bloodhound for {}", "{}");
-                                                                            }} else {{
-                                                                                console.error("[DEBUG] initTypeahead function not available ");
-                                                                            }}
-                                                                        }} else {{
-                                                                            console.log("[DEBUG] Bloodhound already initialized for {}", "{}");
-                                                                            
+
+                                                                        // Force Bloodhound to reinitialize
+                                                                        if (typeof window.initTypeahead === "function") {{
+                                                                            window.initTypeahead("#{}", "{}");
+                                                                            console.log("[RUST] Reinitialized Bloodhound for {}", "{}");
+
                                                                             // Force a query if there's a value
                                                                             if (inputElement.value) {{
-                                                                                // Directly manipulate the DOM to trigger Bloodhound
-                                                                                const currentValue = inputElement.value;
-                                                                                
-                                                                                // Clear and reset the value to force Bloodhound to update
-                                                                                inputElement.value = "";
                                                                                 setTimeout(function() {{
-                                                                                    inputElement.value = currentValue;
-                                                                                    inputElement.dispatchEvent(new Event("input", {{ bubbles: true }}));
-                                                                                    console.log("[DEBUG] Forced input event for {} with value: {}", "{}", currentValue);
-                                                                                }}, 10);
+                                                                                    // Trigger an input event
+                                                                                    const event = new Event("input", {{ bubbles: true }});
+                                                                                    inputElement.dispatchEvent(event);
+                                                                                    console.log("[RUST] Forced input event for {} with value: {}", "{}", inputElement.value);
+                                                                                }}, 50);
                                                                             }}
                                                                         }}
                                                                     }} catch (e) {{
-                                                                        console.error("[DEBUG] Error in focus handler:", e);
+                                                                        console.error("[RUST] Error in focus handler:", e);
                                                                     }}
-                                                                    "#,
-                                                                    input_id, 
-                                                                    input_id, input_id,
-                                                                    input_id, input_id, input_id,
+                                                                    "##,
+                                                                    input_id, input_id, 
                                                                     input_id, input_id, input_id, input_id,
-                                                                    input_id, input_id,
                                                                     input_id, input_id, input_id
                                                                 );
                                                             
