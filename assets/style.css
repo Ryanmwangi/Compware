@@ -204,3 +204,40 @@ th {
   .suggestion-item.tt-cursor {
     background-color: #f5f5f5;
   }
+
+  /* Common styles for delete buttons */
+    .delete-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        border: none;
+        background-color: #ff4d4f;
+        color: white;
+        font-size: 16px;
+        font-weight: bold;
+        cursor: pointer;
+        margin-left: 8px;
+        transition: all 0.2s ease;
+        padding: 0;
+        line-height: 1;
+    }
+    .delete-button:hover {
+        background-color: #ff7875;
+        transform: scale(1.1);
+    }
+    .delete-button:active {
+        background-color: #d9363e;
+        transform: scale(0.95);
+    }
+    /* Specific styles for item delete buttons */
+    .item-delete {
+        vertical-align: middle;
+    }
+    /* Specific styles for property delete buttons */
+    .property-delete {
+        vertical-align: middle;
+        font-size: 14px;
+    }

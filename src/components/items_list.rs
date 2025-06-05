@@ -854,7 +854,11 @@ pub fn ItemsList(
                             view! {
                                 <th>
                                     {item.name.clone()}
-                                    <button on:click=move |_| remove_item(index)>{ "Delete" }</button>
+                                    <button 
+                                        class="delete-button item-delete" 
+                                        on:click=move |_| remove_item(index)
+                                        title="Delete item"
+                                    >{ "×" }</button>
                                 </th>
                             }
                         }).collect::<Vec<_>>()} 
@@ -1176,21 +1180,25 @@ pub fn ItemsList(
                                 <tr>
                                     <td>
                                         { property_label }
-                                        <button class="delete-property" on:click=move |_| {
-                                            log!("Deleting property: {}", property_clone_for_button);
-                                            remove_property_clone(property_clone_for_button.clone());
-                                            set_custom_properties.update(|props| {
-                                                props.retain(|p| p != &property_clone_for_button);
-                                            });
-                                            set_selected_properties.update(|selected| {
-                                                selected.remove(&property_clone_for_button);
-                                            });
-                                            set_items.update(|items| {
-                                                for item in items {
-                                                    item.custom_properties.remove(&property_clone_for_button);
-                                                }
-                                            });
-                                        }>{ "Delete" }</button>
+                                        <button 
+                                            class="delete-button property-delete" 
+                                            title="Delete property"
+                                            on:click=move |_| {
+                                                log!("Deleting property: {}", property_clone_for_button);
+                                                remove_property_clone(property_clone_for_button.clone());
+                                                set_custom_properties.update(|props| {
+                                                    props.retain(|p| p != &property_clone_for_button);
+                                                });
+                                                set_selected_properties.update(|selected| {
+                                                    selected.remove(&property_clone_for_button);
+                                                });
+                                                set_items.update(|items| {
+                                                    for item in items {
+                                                        item.custom_properties.remove(&property_clone_for_button);
+                                                    }
+                                                });
+                                            }
+                                        >{ "x" }</button>
                                     </td>
                                     {move || {
                                         let update_item_cell = Arc::clone(&update_item_inner);
