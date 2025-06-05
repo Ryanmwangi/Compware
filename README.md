@@ -1,7 +1,7 @@
 # [CompareWare](https://compareware.org/)
 
 CompareWare is an open-source platform for comparing tools (software, hardware, etc.) with structured, crowdsourced data.
-It combines Rust's **Leptos** for a modern, reactive frontend and **Nostr** for decentralized data storage (TBI).
+It combines Rust's **Leptos** for a modern, reactive frontend and **rusqlite** for data storage.
 
 ## **Features**
 - **Item Management**: Add, view, and manage items with metadata and key-value tags.
